@@ -4,7 +4,11 @@
 // Inputs: u,v = LED position (0..1, left->right, top->bottom), i = LED index,
 // t = seconds since this step started, pos = position along chosen direction.
 
+import { compileCustom, hash32 } from './custom.js';
+
 export const DIRS = {
+  outer: 'Inner → Outer edge',
+  inner: 'Outer → Inner edge',
   ltr: 'Left → Right',
   rtl: 'Right → Left',
   out: 'Center → Out',
@@ -13,8 +17,11 @@ export const DIRS = {
   down: 'Top → Bottom',
 };
 
-export function posJS(dir, u, v) {
+export function posJS(dir, L) {
+  const u = L.u, v = L.v;
   switch (dir) {
+    case 'outer': return L.o;
+    case 'inner': return 1 - L.o;
     case 'rtl': return 1 - u;
     case 'out': return Math.abs(u - 0.5) * 2;
     case 'in': return 1 - Math.abs(u - 0.5) * 2;
@@ -25,6 +32,8 @@ export function posJS(dir, u, v) {
 }
 export function posCPP(dir) {
   switch (dir) {
+    case 'outer': return 'o';
+    case 'inner': return '1.0f - o';
     case 'rtl': return '1.0f - u';
     case 'out': return 'fabsf(u - 0.5f) * 2.0f';
     case 'in': return '1.0f - fabsf(u - 0.5f) * 2.0f';
@@ -36,13 +45,6 @@ export function posCPP(dir) {
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 const fract = (x) => x - Math.floor(x);
-export function hash32(a, b) {
-  let h = (Math.imul(a, 0x9E3779B1) ^ Math.imul(b + 1, 0x85EBCA6B)) >>> 0;
-  h ^= h >>> 15;
-  h = Math.imul(h, 0x2C1B3C6D) >>> 0;
-  h ^= h >>> 12;
-  return h >>> 0;
-}
 const hue = (h) => [
   clamp01(Math.abs(h * 6 - 3) - 1) * 255,
   clamp01(2 - Math.abs(h * 6 - 2)) * 255,
@@ -66,7 +68,18 @@ export const PARAMS = {
   count: { type: 'int', label: 'Count', min: 1, max: 20 },
   flashes: { type: 'int', label: 'Flashes', min: 1, max: 10 },
   trail: { type: 'range', label: 'Background glow', min: 0, max: 0.5, step: 0.01 },
+  code: { type: 'code', label: 'Formula' },
 };
+
+const cache = new Map();
+export function compiled(code) {
+  if (cache.has(code)) return cache.get(code);
+  let c = null;
+  try { c = compileCustom(code); } catch { c = null; }
+  if (cache.size > 200) cache.clear();
+  cache.set(code, c);
+  return c;
+}
 
 export const ANIMS = {
   solid: {
@@ -88,7 +101,7 @@ export const ANIMS = {
     desc: 'Fills across, holds, then clears – the classic Audi-style turn signal.',
     uses: ['color', 'period', 'dir', 'trail'],
     js: (p, L, t) => {
-      const pos = posJS(p.dir, L.u, L.v);
+      const pos = posJS(p.dir, L);
       const ph = fract(t / p.period);
       const fill = ph < 0.6 ? ph / 0.6 : ph < 0.85 ? 2 : -1;
       return pos <= fill ? p.color : mix([0, 0, 0], p.color, p.trail);
@@ -121,7 +134,7 @@ export const ANIMS = {
     desc: 'A glowing bar bouncing back and forth.',
     uses: ['color', 'period', 'dir', 'width', 'trail'],
     js: (p, L, t) => {
-      const pos = posJS(p.dir, L.u, L.v);
+      const pos = posJS(p.dir, L);
       const ph = fract(t / p.period);
       const s = ph < 0.5 ? ph * 2 : 2 - ph * 2;
       const k = Math.max(p.trail, clamp01(1 - Math.abs(pos - s) / p.width));
@@ -146,7 +159,7 @@ export const ANIMS = {
     desc: 'Dots running along the lights.',
     uses: ['color', 'color2', 'period', 'dir', 'count'],
     js: (p, L, t) => {
-      const pos = posJS(p.dir, L.u, L.v);
+      const pos = posJS(p.dir, L);
       const k = Math.pow(0.5 + 0.5 * Math.cos(TAU * (pos * p.count - t / p.period)), 4);
       return mix(p.color2, p.color, k);
     },
@@ -159,7 +172,7 @@ export const ANIMS = {
     desc: 'Two colors flowing through each other.',
     uses: ['color', 'color2', 'period', 'dir', 'count'],
     js: (p, L, t) => {
-      const pos = posJS(p.dir, L.u, L.v);
+      const pos = posJS(p.dir, L);
       return mix(p.color, p.color2, 0.5 + 0.5 * Math.sin(TAU * (pos * p.count - t / p.period)));
     },
     cpp: (p) => `float pos = ${posCPP(p.dir)};
@@ -170,9 +183,26 @@ export const ANIMS = {
     name: 'Rainbow',
     desc: 'Scrolling rainbow (show only – not road legal!).',
     uses: ['period', 'dir', 'count'],
-    js: (p, L, t) => hue(fract(posJS(p.dir, L.u, L.v) * p.count - t / p.period)),
+    js: (p, L, t) => hue(fract(posJS(p.dir, L) * p.count - t / p.period)),
     cpp: (p) => `float pos = ${posCPP(p.dir)};
   return hueColor(fractf(pos * ${f(p.count)} - t / ${f(p.period)}), BR);`,
+  },
+  custom: {
+    name: 'Custom (AI formula)',
+    desc: 'A formula written by AI (or you). Runs identically in the simulator and on the ESP32.',
+    uses: ['code'],
+    js: (p, L, t) => {
+      const c = compiled(p.code);
+      if (!c) return [0, 0, 0];
+      const [r, g, b] = c.js(L, t);
+      return [r * 255, g * 255, b * 255];
+    },
+    cpp: (p) => {
+      const c = compiled(p.code);
+      if (!c) return 'return CRGB::Black;';
+      return `${c.cpp}
+  return CRGB((uint8_t)(clamp01(r * BR) * 255.0f + 0.5f), (uint8_t)(clamp01(g * BR) * 255.0f + 0.5f), (uint8_t)(clamp01(b * BR) * 255.0f + 0.5f));`;
+    },
   },
   sparkle: {
     name: 'Sparkle',
@@ -196,7 +226,7 @@ export function defaultParams(type) {
     width: 0.2, count: 3, flashes: 3, trail: 0, brightness: 1,
   };
   const t = {
-    sequential: { color: [255, 110, 0], period: 0.8, dir: 'out' },
+    sequential: { color: [255, 110, 0], period: 0.8, dir: 'outer' },
     blink: { color: [255, 110, 0], period: 0.8 },
     brake: { period: 0.12, flashes: 4 },
     scanner: { period: 1.6, width: 0.15, trail: 0.03 },
@@ -206,6 +236,7 @@ export function defaultParams(type) {
     rainbow: { period: 3, count: 1 },
     sparkle: { color2: [255, 255, 255], width: 0.15, trail: 0.25 },
     solid: { brightness: 0.4 },
+    custom: { code: 'float w = tri(o * 2 - t * 0.5);\nr = w;\ng = w * 0.1;' },
   }[type] || {};
   return { ...base, ...t };
 }
@@ -221,24 +252,5 @@ export function defaultDuration(s) {
   }
 }
 
-// Render a frame: returns array of [r,g,b] (0..255 ints) in physical order.
-export function renderFrame(layout, steps, timeSec) {
-  const out = new Array(layout.leds.length);
-  const total = steps.reduce((a, s) => a + s.duration, 0);
-  if (!steps.length || total <= 0) return out.fill([0, 0, 0]);
-  let tc = timeSec % total, step = steps[steps.length - 1], start = total - step.duration;
-  for (let k = 0, acc = 0; k < steps.length; k++) {
-    if (tc < acc + steps[k].duration) { step = steps[k]; start = acc; break; }
-    acc += steps[k].duration;
-  }
-  const t = tc - start;
-  const def = ANIMS[step.type] || ANIMS.off;
-  const br = step.brightness;
-  for (const L of layout.leds) {
-    const c = def.js(step, L, t);
-    out[L.i] = [Math.round(clamp01(c[0] / 255 * br) * 255), Math.round(clamp01(c[1] / 255 * br) * 255), Math.round(clamp01(c[2] / 255 * br) * 255)];
-  }
-  return out;
-}
 
 export const fmtF = f;

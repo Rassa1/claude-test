@@ -11,7 +11,7 @@
     <div class="brand"><span class="logo"></span>Taillight Studio</div>
     <nav class="tabs">
       <button data-tab="build" class="active"><b>1</b> Build matrix</button>
-      <button data-tab="animate"><b>2</b> Animate</button>
+      <button data-tab="animate"><b>2</b> Buttons &amp; animate</button>
       <button data-tab="code"><b>3</b> ESP32 code</button>
     </nav>
   </header>
@@ -20,7 +20,7 @@
   <main id="tab-build" class="tab active">
     <section class="stage">
       <canvas id="buildCanvas"></canvas>
-      <div class="stage-hint">Drag a row sideways to shift it · Click a row to select it</div>
+      <div class="stage-hint">This is the left light (seen from behind). The right one is its mirror image. Drag a row sideways to shift it.</div>
       <div class="stage-stats" id="buildStats"></div>
     </section>
     <aside class="panel">
@@ -49,6 +49,9 @@
       <h3>Rows <span class="muted small">(LED count · shift in mm)</span></h3>
       <div id="rowTable" class="rowtable"></div>
 
+      <h3>Lights</h3>
+      <label>How many taillights<select id="lights"><option value="both">Two lights (left + right, mirrored)</option><option value="left">Left light only</option><option value="right">Right light only</option></select></label>
+
       <h3>Wiring</h3>
       <div class="grid2">
         <label>Pattern<select id="wiring"><option value="serpentine">Zig-zag (serpentine)</option><option value="progressive">Every row same direction</option></select></label>
@@ -58,35 +61,32 @@
         <label><input type="checkbox" id="showWiring" checked /> Show data path</label>
         <label><input type="checkbox" id="showIndex" /> Show LED numbers</label>
       </div>
-      <button class="primary wide" data-goto="animate">Next: animate →</button>
+      <button class="primary wide" data-goto="animate">Next: buttons &amp; animate →</button>
     </aside>
   </main>
 
-  <!-- 2. ANIMATE -->
+  <!-- 2. BUTTONS & ANIMATE -->
   <main id="tab-animate" class="tab">
     <section class="stage">
-      <canvas id="simCanvas"></canvas>
-      <div class="transport">
-        <button id="play" class="icon" title="Play/pause">❚❚</button>
-        <button id="restart" class="icon" title="Restart">↺</button>
-        <div class="timeline" id="timeline"><div class="playhead" id="playhead"></div></div>
-        <span id="clock" class="mono">0.00s</span>
-        <select id="simSpeed" title="Playback speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+      <div class="stage-top">
+        <div class="seg-ctl" id="viewSel" role="group" aria-label="Lights shown">
+          <button data-view="both">Both lights</button><button data-view="left">Left</button><button data-view="right">Right</button>
+        </div>
+        <div class="stage-top-right">
+          <label class="inline-sm">Speed <select id="simSpeed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
+          <button id="allOff" class="ghost sm">All off</button>
+        </div>
       </div>
+      <canvas id="simCanvas"></canvas>
+      <div class="btnbar" id="btnbar"></div>
+      <div class="bar-hint">Click toggles · hold momentary buttons · keys 1–9 work too</div>
     </section>
     <aside class="panel">
-      <h2>Describe your animation</h2>
-      <textarea id="prompt" rows="4" placeholder="e.g. amber sweep from the center out 3 times then off for 0.3 seconds"></textarea>
-      <div class="row-btns">
-        <button class="primary" id="generate">Simulate ✦</button>
-        <span class="muted small">Use “then” to chain steps.</span>
-      </div>
-      <details class="examples"><summary>Examples</summary><div class="chips" id="examples"></div></details>
+      <h2>Buttons <span class="muted small">top = drawn on top</span></h2>
+      <div id="btnList" class="btnlist"></div>
+      <button id="addBtn" class="ghost wide sm-top">+ Add button</button>
 
-      <h3>Steps <span class="muted small">(fine-tune anything)</span></h3>
-      <div id="steps"></div>
-      <button id="addStep" class="ghost wide">+ Add step</button>
-      <button class="primary wide" data-goto="code">Next: get ESP32 code →</button>
+      <div id="btnEditor"></div>
     </aside>
   </main>
 
@@ -105,7 +105,8 @@
     <aside class="panel">
       <h2>Hardware</h2>
       <div class="grid2">
-        <label>Data pin (GPIO)<input type="number" id="dataPin" min="0" max="48" /></label>
+        <label>Left light data pin<input type="number" id="dataPin" min="0" max="48" /></label>
+        <label>Right light data pin<input type="number" id="dataPinR" min="0" max="48" /></label>
         <label>LED chip<select id="ledType"><option>WS2812B</option><option>WS2811</option><option>WS2813</option><option>WS2815</option><option>SK6812</option></select></label>
         <label>Color order<select id="colorOrder"><option>GRB</option><option>RGB</option><option>BRG</option><option>RBG</option><option>GBR</option><option>BGR</option></select></label>
         <label>Power limit (mA)<input type="number" id="maxMa" min="100" max="20000" step="100" /></label>
@@ -117,6 +118,7 @@
         <li>Library Manager → install <b>FastLED</b>.</li>
         <li>Paste the code into a new sketch (or open the downloaded .ino).</li>
         <li>Tools → Board → your ESP32 board, pick the port, press Upload.</li>
+        <li>Wire each button between its GPIO and GND. Pins are set per button on the Buttons tab.</li>
       </ol>
       <p class="warn">Check your local laws: rear lights generally must be red (amber for indicators) and can't flash, except signals. Rainbow/sparkle effects are for shows only.</p>
     </aside>

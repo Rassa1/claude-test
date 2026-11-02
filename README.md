@@ -12,15 +12,24 @@ python3 -m http.server 8000
 
 ## How it works
 1. **Build matrix** – rows, LEDs/meter, row length, row spacing. Shape presets (stagger, taper, slant, arc, random shift), drag any row sideways, set per-row LED counts, and pick the wiring (zig-zag / same direction, first-LED corner).
-2. **Animate** – type something like `amber sweep from the center out 3 times then off for 0.3 seconds`. Chain steps with “then”. Every step can be fine-tuned (color, speed, direction, width, brightness, length).
-3. **ESP32 code** – set data pin, LED chip, color order and power limit, then copy or download `taillight.ino`. The sketch uses the exact same math as the simulator, so what you see is what the LEDs do.
+   Choose two mirrored lights (left + right) or a single light.
+2. **Buttons & animate** – each button (Running, Brake, Left/Right turn, Hazards, or your own) has:
+   - mode: **toggle** (press on/off) or **momentary** (on while held, optional “stay on after release” for pulsing car indicator wires)
+   - which light(s) it drives (both / left / right)
+   - layering: **replace** lower buttons, or **lay lit LEDs on top** (e.g. turn signal over brake)
+   - an animation you describe in plain English. On the claude.ai-hosted page Claude interprets it (and can write custom formula effects); offline a keyword parser is used.
+   Click/hold the buttons under the lights (or keys 1–9) to test combos like running + brake + left turn. Top of the list = highest priority.
+3. **ESP32 code** – set data pins, LED chip, color order and power limit, then copy or download `taillight.ino`. It includes the button inputs (GPIO to GND, internal pull-ups) and uses the exact same math as the simulator.
 
-Animations: solid, off, sequential sweep, blink/hazard, brake flash, scanner, breathe, chase, color wave, rainbow, sparkle.
+Animations: solid, off, sequential sweep, blink/hazard, brake flash, scanner, breathe, chase, color wave, rainbow, sparkle, and custom formulas (`js/custom.js`).
 
 ## Files
 - `js/matrix.js` – layout model + drawing
 - `js/animations.js` – animation library (JS + matching C++)
 - `js/parser.js` – plain-English → steps
+- `js/engine.js` – buttons, layering, two-light scene
+- `js/ai.js` – Claude interpretation (claude.ai artifact runtime) with keyword fallback
+- `js/custom.js` – formula language compiled to JS and C++
 - `js/codegen.js` – Arduino sketch generator
 - `js/app.js` – UI
 

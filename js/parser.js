@@ -74,10 +74,12 @@ function parseStep(raw) {
   }
 
   // direction
-  if (/(center|centre|middle)\s*(to|->)?\s*(the\s*)?(out|outward|edges?|sides?)|outward|from the (center|centre|middle)/.test(txt)) s.dir = 'out';
-  else if (/(edges?|sides?|outside)\s*(to|->)?\s*(the\s*)?(in|inward|center|centre|middle)|inward|to the (center|centre|middle)/.test(txt)) s.dir = 'in';
-  else if (/right\s*(to|->)\s*left|to the left|leftward|\bleft turn|turn(ing)? left|\bleft\b/.test(txt) && !/left\s*(to|->)\s*right|from the left/.test(txt)) s.dir = 'rtl';
-  else if (/left\s*(to|->)\s*right|to the right|rightward|from the left|\bright\b/.test(txt)) s.dir = 'ltr';
+  if (/(inner|inside)\s*(edge\s*)?(to|->)\s*(the\s*)?(outer|outside)|towards? the outside|outward/.test(txt)) s.dir = 'outer';
+  else if (/(outer|outside)\s*(edge\s*)?(to|->)\s*(the\s*)?(inner|inside)|towards? the inside|inward/.test(txt)) s.dir = 'inner';
+  else if (/(center|centre|middle)\s*(to|->)?\s*(the\s*)?(out|edges?|sides?)|from the (center|centre|middle)/.test(txt)) s.dir = 'out';
+  else if (/(edges?|sides?|outside)\s*(to|->)?\s*(the\s*)?(in|center|centre|middle)|to the (center|centre|middle)/.test(txt)) s.dir = 'in';
+  else if (/right\s*(to|->)\s*left|to the left|leftward/.test(txt) && !/left\s*(to|->)\s*right|from the left/.test(txt)) s.dir = 'rtl';
+  else if (/left\s*(to|->)\s*right|to the right|rightward|from the left/.test(txt)) s.dir = 'ltr';
   else if (/bottom\s*(to|->)\s*top|\bupward|\bup\b|bottom up/.test(txt)) s.dir = 'up';
   else if (/top\s*(to|->)\s*bottom|\bdownward|\bdown\b|top down/.test(txt)) s.dir = 'down';
 
