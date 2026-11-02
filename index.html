@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Taillight Studio</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="logo"></span>Taillight Studio</div>
+    <nav class="tabs">
+      <button data-tab="build" class="active"><b>1</b> Build matrix</button>
+      <button data-tab="animate"><b>2</b> Animate</button>
+      <button data-tab="code"><b>3</b> ESP32 code</button>
+    </nav>
+  </header>
+
+  <!-- 1. MATRIX BUILDER -->
+  <main id="tab-build" class="tab active">
+    <section class="stage">
+      <canvas id="buildCanvas"></canvas>
+      <div class="stage-hint">Drag a row sideways to shift it · Click a row to select it</div>
+      <div class="stage-stats" id="buildStats"></div>
+    </section>
+    <aside class="panel">
+      <h2>Layout</h2>
+      <div class="grid2">
+        <label>Rows<input type="number" id="rows" min="1" max="40" /></label>
+        <label>LEDs / meter<select id="density">
+          <option>30</option><option>60</option><option>96</option><option>100</option><option>144</option><option>160</option>
+        </select></label>
+        <label>Row length (cm)<input type="number" id="rowLen" min="1" max="300" step="0.5" /></label>
+        <label>Row spacing (mm)<input type="number" id="rowGap" min="2" max="200" step="0.5" /></label>
+      </div>
+      <p class="muted" id="perRow"></p>
+
+      <h3>Shape</h3>
+      <div class="chips" id="shapes">
+        <button data-shape="rect">Rectangle</button>
+        <button data-shape="stagger">Staggered</button>
+        <button data-shape="taper">Taper</button>
+        <button data-shape="slant">Slant</button>
+        <button data-shape="arc">Arc</button>
+        <button data-shape="jitter">Random shift</button>
+      </div>
+      <label class="inline">Shape strength<input type="range" id="shapeAmt" min="0" max="1" step="0.05" value="0.5" /></label>
+
+      <h3>Rows <span class="muted small">(LED count · shift in mm)</span></h3>
+      <div id="rowTable" class="rowtable"></div>
+
+      <h3>Wiring</h3>
+      <div class="grid2">
+        <label>Pattern<select id="wiring"><option value="serpentine">Zig-zag (serpentine)</option><option value="progressive">Every row same direction</option></select></label>
+        <label>First LED<select id="start"><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="showWiring" checked /> Show data path</label>
+        <label><input type="checkbox" id="showIndex" /> Show LED numbers</label>
+      </div>
+      <button class="primary wide" data-goto="animate">Next: animate →</button>
+    </aside>
+  </main>
+
+  <!-- 2. ANIMATE -->
+  <main id="tab-animate" class="tab">
+    <section class="stage">
+      <canvas id="simCanvas"></canvas>
+      <div class="transport">
+        <button id="play" class="icon" title="Play/pause">❚❚</button>
+        <button id="restart" class="icon" title="Restart">↺</button>
+        <div class="timeline" id="timeline"><div class="playhead" id="playhead"></div></div>
+        <span id="clock" class="mono">0.00s</span>
+        <select id="simSpeed" title="Playback speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+      </div>
+    </section>
+    <aside class="panel">
+      <h2>Describe your animation</h2>
+      <textarea id="prompt" rows="4" placeholder="e.g. amber sweep from the center out 3 times then off for 0.3 seconds"></textarea>
+      <div class="row-btns">
+        <button class="primary" id="generate">Simulate ✦</button>
+        <span class="muted small">Use “then” to chain steps.</span>
+      </div>
+      <details class="examples"><summary>Examples</summary><div class="chips" id="examples"></div></details>
+
+      <h3>Steps <span class="muted small">(fine-tune anything)</span></h3>
+      <div id="steps"></div>
+      <button id="addStep" class="ghost wide">+ Add step</button>
+      <button class="primary wide" data-goto="code">Next: get ESP32 code →</button>
+    </aside>
+  </main>
+
+  <!-- 3. CODE -->
+  <main id="tab-code" class="tab">
+    <section class="codewrap">
+      <div class="code-bar">
+        <span class="mono" id="codeInfo"></span>
+        <div>
+          <button id="copy" class="primary">Copy code</button>
+          <button id="download" class="ghost">Download .ino</button>
+        </div>
+      </div>
+      <pre id="code" class="code"></pre>
+    </section>
+    <aside class="panel">
+      <h2>Hardware</h2>
+      <div class="grid2">
+        <label>Data pin (GPIO)<input type="number" id="dataPin" min="0" max="48" /></label>
+        <label>LED chip<select id="ledType"><option>WS2812B</option><option>WS2811</option><option>WS2813</option><option>WS2815</option><option>SK6812</option></select></label>
+        <label>Color order<select id="colorOrder"><option>GRB</option><option>RGB</option><option>BRG</option><option>RBG</option><option>GBR</option><option>BGR</option></select></label>
+        <label>Power limit (mA)<input type="number" id="maxMa" min="100" max="20000" step="100" /></label>
+      </div>
+      <p class="muted" id="powerInfo"></p>
+      <h3>How to flash it</h3>
+      <ol class="steps-help">
+        <li>Install the <b>Arduino IDE</b> and add ESP32 support (Boards Manager → “esp32” by Espressif).</li>
+        <li>Library Manager → install <b>FastLED</b>.</li>
+        <li>Paste the code into a new sketch (or open the downloaded .ino).</li>
+        <li>Tools → Board → your ESP32 board, pick the port, press Upload.</li>
+      </ol>
+      <p class="warn">Check your local laws: rear lights generally must be red (amber for indicators) and can't flash, except signals. Rainbow/sparkle effects are for shows only.</p>
+    </aside>
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
