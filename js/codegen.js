@@ -27,7 +27,9 @@ export function generateSketch(matrix, layout, buttons) {
   const V = layout.leds.map((l) => l.qv);
   const lights = matrix.lights || 'both';
   const sideIds = lights === 'both' ? [0, 1] : lights === 'right' ? [1] : [0];
-  const sidePins = sideIds.map((s) => (s ? matrix.dataPinR : matrix.dataPin));
+  const outs = matrix.outputs.map((o, k) => ({ ...o, ...layout.outInfo[k], k })).filter((o) => o.count > 0);
+  const pinOf = (o, side) => (side ? o.pinR : o.pinL);
+  const rowList = (rows) => rows.map((r) => r + 1).join(', ');
   const rowsDesc = matrix.rows.map((r, i) => ` *   row ${i + 1}: ${r.count} LEDs, shifted ${(+r.offset).toFixed(1)} mm`).join('\n');
   const usesCustom = buttons.some((b) => b.steps.some((s) => s.type === 'custom'));
 
@@ -62,7 +64,10 @@ static CRGB b${bk}s${k}(int i_, float u, float v, float o, int side_, float t) {
  * Library: FastLED  (Arduino IDE: Tools > Manage Libraries > search "FastLED")
  *
  * LED wiring:
-${sideIds.map((s, k) => ` *   ${s ? 'Right' : 'Left'} light DIN -> GPIO ${sidePins[k]} (through a 330 ohm resistor; a 74AHCT125 level shifter is recommended)`).join('\n')}
+${sideIds.map((s) => outs.map((o) => ` *   ${s ? 'Right' : 'Left'} light, data line ${o.k + 1} (row${o.rows.length > 1 ? 's' : ''} ${rowList(o.rows)}, ${o.count} LEDs) DIN -> GPIO ${pinOf(o, s)}`).join('\n')).join('\n')}
+ *   Put a 330 ohm resistor in each data line; a 74AHCT125 level shifter (4 lines each) is recommended.
+ *   Each data line starts at the ${matrix.start.replace('-', ' ')} corner of its own rows${matrix.wiring === 'serpentine' ? ' and zig-zags through them' : ', every row running the same direction'}
+ *   (on the right light everything is mirrored).
  *   LED 5V -> 5V supply (NOT the ESP32 3V3 pin), LED GND -> supply GND + ESP32 GND.
  *   In a car use a 12V -> 5V buck converter rated for the current below.
  *
@@ -95,6 +100,7 @@ static const uint8_t SIDE_ID[NUM_SIDES] = { ${sideIds.join(', ')} };   // 0 = le
 CRGB leds[NUM_SIDES][NUM_LEDS];
 
 // Normalised LED positions (0..255) of the LEFT light in wiring order: U = left->right, V = top->bottom
+// Data lines split this array: ${outs.map((o) => `line ${o.k + 1} = LEDs ${o.start}..${o.start + o.count - 1}`).join(', ')}
 const uint8_t LED_U[NUM_LEDS] = {
 ${wrap(U)}
 };
@@ -185,7 +191,7 @@ ${dispatch}
 }
 
 void setup() {
-${sideIds.map((s, k) => `  FastLED.addLeds<LED_TYPE, ${sidePins[k]}, COLOR_ORDER>(leds[${k}], NUM_LEDS);   // ${s ? 'right' : 'left'} light`).join('\n')}
+${sideIds.map((s, k) => outs.map((o) => `  FastLED.addLeds<LED_TYPE, ${pinOf(o, s)}, COLOR_ORDER>(leds[${k}] + ${o.start}, ${o.count});   // ${s ? 'right' : 'left'} light, line ${o.k + 1}: row${o.rows.length > 1 ? 's' : ''} ${rowList(o.rows)}`).join('\n')).join('\n')}
   FastLED.setMaxPowerInVoltsAndMilliamps(5, MAX_MILLIAMPS);
   FastLED.setBrightness(255);
   FastLED.clear(true);

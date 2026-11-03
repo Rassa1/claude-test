@@ -160,3 +160,23 @@ textarea.code-in { font-family: ui-monospace, monospace; font-size: 12px; min-he
 .params .full { grid-column: 1 / -1; }
 .err { color: #ff8a80; font-size: 11px; }
 .full2 { grid-column: 1 / -1; }
+
+/* ---- data lines & pins ---- */
+.rowitem { grid-template-columns: 30px 1fr 1fr 64px 22px; }
+.rowitem select { padding: 4px 4px; }
+.small-p { font-size: 12px; margin: 0 0 8px; }
+.outputs { display: flex; flex-direction: column; gap: 8px; }
+.outcard { background: var(--panel2); border: 1px solid var(--line); border-left: 3px solid var(--oc); border-radius: 8px; padding: 8px 10px; }
+.outcard-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 600; font-size: 13px; }
+.outcard-head .meta { font-weight: 400; color: var(--muted); font-size: 11px; }
+.outcard-head .meta.bad { color: #f0b37e; }
+.outcard-head button { background: none; border: 0; color: var(--muted); font-size: 16px; }
+.outcard .grid2 { margin-top: 6px; }
+.rowchips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.rowchips button { min-width: 30px; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; }
+.rowchips button.on { background: var(--oc); border-color: var(--oc); color: #0b0c10; font-weight: 700; }
+.pinwarn { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.pinwarn div { font-size: 12px; color: #f0b37e; background: #2a1d10; border: 1px solid #4a3218; border-radius: 6px; padding: 5px 8px; }
+.pintable { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12px; }
+.pintable .p { font-family: ui-monospace, monospace; color: var(--text); }
+.pintable .w { color: var(--muted); }

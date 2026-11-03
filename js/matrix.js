@@ -12,7 +12,8 @@ export function defaultMatrix() {
     ledType: 'WS2812B',
     colorOrder: 'GRB',
     maxMilliamps: 2000,
-    rows: Array.from({ length: 4 }, () => ({ count: 18, offset: 0 })),
+    outputs: [{ pinL: 5, pinR: 18 }],   // one data line per output, per light
+    rows: Array.from({ length: 4 }, () => ({ count: 18, offset: 0, out: 0 })),
   };
 }
 
@@ -31,17 +32,25 @@ export function computeLayout(m) {
 
   const fromBottom = m.start.startsWith('bottom');
   const fromRight = m.start.endsWith('right');
-  const order = rowsPos.map((_, i) => i);
-  if (fromBottom) order.reverse();
+  const nOut = Math.max(1, (m.outputs || []).length);
 
+  // Each output (data line) chains its own rows: starting at the chosen corner,
+  // zig-zag or same-direction across those rows only.
   const leds = [];
-  order.forEach((ri, k) => {
-    const arr = rowsPos[ri].slice();
-    let rev = fromRight;
-    if (m.wiring === 'serpentine' && k % 2 === 1) rev = !rev;
-    if (rev) arr.reverse();
-    leds.push(...arr);
-  });
+  const outInfo = [];
+  for (let oi = 0; oi < nOut; oi++) {
+    const rowIdx = m.rows.map((r, i) => ((r.out ?? 0) >= nOut ? 0 : r.out ?? 0) === oi ? i : -1).filter((i) => i >= 0);
+    if (fromBottom) rowIdx.reverse();
+    const start = leds.length;
+    rowIdx.forEach((ri, k) => {
+      const arr = rowsPos[ri].slice();
+      let rev = fromRight;
+      if (m.wiring === 'serpentine' && k % 2 === 1) rev = !rev;
+      if (rev) arr.reverse();
+      arr.forEach((l) => { l.out = oi; l.oi = leds.length - start; leds.push(l); });
+    });
+    outInfo.push({ start, count: leds.length - start, rows: rowIdx.slice().sort((a, b) => a - b) });
+  }
 
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const l of leds) {
@@ -58,7 +67,7 @@ export function computeLayout(m) {
     l.u = l.qu / 255;
     l.v = l.qv / 255;
   });
-  return { leds, minX, maxX, minY, maxY, pitch };
+  return { leds, outInfo, minX, maxX, minY, maxY, pitch };
 }
 
 // Shape helpers -------------------------------------------------------------
@@ -108,6 +117,9 @@ export function viewTransform(canvas, layout, pad = 40) {
   return { s, ox, oy, toScreen: (x, y) => [ox + x * s, oy + y * s], toWorld: (sx, sy) => [(sx - ox) / s, (sy - oy) / s] };
 }
 
+const OUT_HUES = [200, 35, 130, 290, 0, 60, 170, 320];
+export function outColor(k, a = 1) { return `hsla(${OUT_HUES[k % OUT_HUES.length]}, 75%, 62%, ${a})`; }
+
 // colors: array of [r,g,b] in physical order, or null for the "unlit" builder look.
 export function drawLeds(canvas, layout, colors, opts = {}) {
   const ctx = canvas.getContext('2d');
@@ -119,13 +131,18 @@ export function drawLeds(canvas, layout, colors, opts = {}) {
   const r = Math.max(1.5, Math.min(layout.pitch * vt.s * 0.36, 14));
 
   if (opts.showWiring) {
-    ctx.strokeStyle = 'rgba(120,140,170,0.35)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.5;
+    let prevOut = -1;
     ctx.beginPath();
-    layout.leds.forEach((l, k) => {
+    for (const l of layout.leds) {
       const [x, y] = vt.toScreen(l.x, l.y);
-      k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-    });
+      if (l.out !== prevOut) {
+        ctx.stroke();
+        ctx.strokeStyle = outColor(l.out ?? 0, 0.55);
+        ctx.beginPath(); ctx.moveTo(x, y);
+        prevOut = l.out;
+      } else ctx.lineTo(x, y);
+    }
     ctx.stroke();
   }
 
@@ -134,9 +151,20 @@ export function drawLeds(canvas, layout, colors, opts = {}) {
     const [x, y] = vt.toScreen(l.x, l.y);
     const hi = opts.highlightRow === l.row;
     ctx.fillStyle = hi ? '#3a3f4d' : '#22252d';
-    ctx.strokeStyle = hi ? '#ff5a4f' : '#363a45';
+    ctx.strokeStyle = hi ? '#ff5a4f' : opts.showWiring && l.out !== undefined ? outColor(l.out, 0.6) : '#363a45';
     ctx.lineWidth = hi ? 1.5 : 1;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+  // first LED of each data line
+  if (opts.showWiring) {
+    ctx.font = '600 10px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    for (const l of layout.leds) {
+      if (l.oi !== 0 || l.out === undefined) continue;
+      const [x, y] = vt.toScreen(l.x, l.y);
+      ctx.fillStyle = outColor(l.out, 1);
+      ctx.beginPath(); ctx.arc(x, y, r * 0.45, 0, Math.PI * 2); ctx.fill();
+      ctx.fillText(opts.outLabel ? opts.outLabel(l.out) : 'OUT ' + (l.out + 1), x, y - r - 3);
+    }
   }
 
   if (colors) {

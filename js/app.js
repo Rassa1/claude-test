@@ -5,6 +5,8 @@ import { compileCustom } from './custom.js';
 import { generateSketch } from './codegen.js';
 import { buildScene, renderScene, newInputState, press, release, isActive, totalMs, stepAt } from './engine.js';
 import { interpret, getSample } from './ai.js';
+import { pinUsage, pinOptions, pinProblems, MAX_LED_OUTPUTS } from './pins.js';
+import { outColor } from './matrix.js';
 
 const $ = (s) => document.querySelector(s);
 const STORE = 'taillight-studio-v2';
@@ -33,7 +35,8 @@ function load() {
 }
 let state = load() || { matrix: defaultMatrix(), buttons: defaultButtons(), sel: 0 };
 state.matrix.lights ??= 'both';
-state.matrix.dataPinR ??= 18;
+state.matrix.outputs ??= [{ pinL: state.matrix.dataPin ?? 5, pinR: state.matrix.dataPinR ?? 18 }];
+state.matrix.rows.forEach((r) => { r.out ??= 0; if (r.out >= state.matrix.outputs.length) r.out = 0; });
 state.view ??= state.matrix.lights;
 let layout = computeLayout(state.matrix);
 let scene = buildScene(layout, state.view);
@@ -48,8 +51,10 @@ function matrixChanged() {
   layout = computeLayout(state.matrix);
   scene = buildScene(layout, state.view);
   renderBuild();
+  renderOutputs();
   save();
 }
+const warnHtml = (list) => list.map((w) => `<div>${w.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</div>`).join('');
 
 // ---------------------------------------------------------------- tabs
 function showTab(name) {
@@ -85,8 +90,10 @@ function renderRowTable() {
     d.innerHTML = `<span>#${i + 1}</span>
       <input type="number" min="1" max="500" value="${r.count}" title="LEDs in this row" />
       <input type="number" step="0.5" value="${(+r.offset).toFixed(1)}" title="Shift (mm)" />
+      <select title="Data line for this row" style="border-color:${outColor(r.out ?? 0, 0.8)}">${state.matrix.outputs.map((_, k) => `<option value="${k}" ${k === r.out ? 'selected' : ''}>Line ${k + 1}</option>`).join('')}</select>
       <button class="x" title="Remove row">×</button>`;
     const [cnt, off] = d.querySelectorAll('input');
+    d.querySelector('select').onchange = (e) => { r.out = +e.target.value; renderRowTable(); matrixChanged(); };
     cnt.oninput = () => { r.count = Math.max(1, Math.min(500, +cnt.value || 1)); matrixChanged(); };
     off.oninput = () => { r.offset = +off.value || 0; matrixChanged(); };
     d.querySelector('.x').onclick = () => {
@@ -127,6 +134,69 @@ $('#rowGap').oninput = (e) => { state.matrix.rowGapMm = Math.max(1, +e.target.va
 $('#wiring').onchange = (e) => { state.matrix.wiring = e.target.value; matrixChanged(); };
 $('#start').onchange = (e) => { state.matrix.start = e.target.value; matrixChanged(); };
 $('#showWiring').onchange = renderBuild;
+
+// data lines (outputs)
+function renderOutputs() {
+  const m = state.matrix, root = $('#outputs');
+  const usage = pinUsage(m, state.buttons);
+  const both = m.lights === 'both';
+  root.innerHTML = '';
+  m.outputs.forEach((o, k) => {
+    const info = layout.outInfo[k] || { count: 0 };
+    const ms = info.count * 0.03;                       // WS2812: ~30 µs per LED
+    const fps = info.count ? Math.min(400, Math.floor(1000 / (ms + 0.3))) : 0;
+    const d = document.createElement('div');
+    d.className = 'outcard';
+    d.style.setProperty('--oc', outColor(k));
+    const pinSel = (side, label) => `<label>${label}<select data-side="${side}">${pinOptions(side === 'R' ? o.pinR : o.pinL, usage, `LEDs ${both ? side : ''}${k + 1}`, true)}</select></label>`;
+    d.innerHTML = `<div class="outcard-head"><span>Line ${k + 1}</span>
+        <span class="meta ${info.count > 800 ? 'bad' : ''}">${info.count} LEDs · max ~${fps} fps</span>
+        ${m.outputs.length > 1 ? '<button title="Remove this data line">×</button>' : '<span></span>'}</div>
+      <div class="grid2">${m.lights !== 'right' ? pinSel('L', both ? 'Left light pin' : 'Pin') : ''}${m.lights !== 'left' ? pinSel('R', both ? 'Right light pin' : 'Pin') : ''}</div>
+      <div class="rowchips" title="Rows on this line">${m.rows.map((r, i) => `<button data-row="${i}" class="${r.out === k ? 'on' : ''}" title="Row ${i + 1}: ${r.count} LEDs">${i + 1}</button>`).join('')}</div>`;
+    d.querySelectorAll('select').forEach((sel) => (sel.onchange = (e) => {
+      o[sel.dataset.side === 'R' ? 'pinR' : 'pinL'] = +e.target.value;
+      renderOutputs(); save();
+    }));
+    d.querySelectorAll('.rowchips button').forEach((b) => (b.onclick = () => {
+      m.rows[+b.dataset.row].out = k;
+      renderRowTable(); matrixChanged();
+    }));
+    d.querySelector('.outcard-head button')?.addEventListener('click', () => {
+      m.outputs.splice(k, 1);
+      m.rows.forEach((r) => { if (r.out === k) r.out = Math.max(0, k - 1); else if (r.out > k) r.out--; });
+      renderRowTable(); matrixChanged();
+    });
+    root.appendChild(d);
+  });
+  const lines = (both ? 2 : 1) * m.outputs.length;
+  $('#addOut').disabled = lines + (both ? 2 : 1) > MAX_LED_OUTPUTS;
+  const warn = pinProblems(m, state.buttons);
+  if (m.outputs.some((_, k) => !(layout.outInfo[k]?.count))) warn.push('A data line has no rows – give it rows or remove it.');
+  $('#buildWarn').innerHTML = warnHtml(warn);
+}
+function freePin(exclude = []) {
+  const used = new Set([...pinUsage(state.matrix, state.buttons).keys(), ...exclude]);
+  return [16, 17, 19, 21, 22, 23, 4, 32, 33, 13, 14, 25, 26, 27, 5, 18].find((p) => !used.has(p)) ?? 4;
+}
+$('#addOut').onclick = () => {
+  const m = state.matrix;
+  const pinL = freePin(), pinR = freePin([pinL]);
+  m.outputs.push({ pinL, pinR });
+  // move the bottom half of the last line's rows to the new line
+  const k = m.outputs.length - 1;
+  const rows = m.rows.map((r, i) => (r.out === k - 1 ? i : -1)).filter((i) => i >= 0);
+  rows.slice(Math.ceil(rows.length / 2)).forEach((i) => (m.rows[i].out = k));
+  renderRowTable(); matrixChanged();
+};
+$('#splitOut').onclick = () => {
+  const m = state.matrix, n = m.outputs.length;
+  // contiguous blocks with roughly equal LED counts
+  const total = m.rows.reduce((a, r) => a + r.count, 0);
+  let acc = 0;
+  m.rows.forEach((r) => { r.out = Math.min(n - 1, Math.floor((acc + r.count / 2) / (total / n))); acc += r.count; });
+  renderRowTable(); matrixChanged();
+};
 $('#showIndex').onchange = renderBuild;
 document.querySelectorAll('#shapes button').forEach((b) => (b.onclick = () => {
   applyShape(state.matrix, b.dataset.shape, +$('#shapeAmt').value);
@@ -169,12 +239,14 @@ $('#lights').value = state.matrix.lights;
 $('#lights').onchange = (e) => {
   state.matrix.lights = e.target.value;
   setView(e.target.value);
+  renderOutputs();
   save();
 };
 
 // ---------------------------------------------------------------- buttons & simulator
 const sc = $('#simCanvas');
 let simNow = 0, lastTs = performance.now();
+let lastActiveSig = '';
 let inputs = new Map();       // button id -> input state
 const pendingRelease = new Map();
 const inp = (b) => { if (!inputs.has(b.id)) inputs.set(b.id, newInputState()); return inputs.get(b.id); };
@@ -205,6 +277,7 @@ function doRelease(b) { release(b, inp(b), simNow); }
 
 // stage button bar
 function renderBar() {
+  lastActiveSig = '';
   const bar = $('#btnbar');
   bar.innerHTML = '';
   state.buttons.forEach((b, k) => {
@@ -257,7 +330,7 @@ function renderList() {
   });
 }
 $('#addBtn').onclick = () => {
-  const used = new Set(state.buttons.map((b) => b.pin));
+  const used = pinUsage(state.matrix, state.buttons);
   const pin = SAFE_PINS.find((p) => !used.has(p)) ?? 15;
   state.buttons.unshift(mkBtn('New button', 'toggle', 'both', 'overlay', true, pin, 'red knight rider scanner'));
   state.sel = 0;
@@ -279,13 +352,15 @@ function renderEditor() {
     <h3>Button settings</h3>
     <div class="grid2">
       <label class="full2">Name<input type="text" id="bName" maxlength="40" value="${esc(b.name)}"></label>
-      <label>GPIO pin<input type="number" id="bPin" min="0" max="48" value="${b.pin}"></label>
+      <label>ESP32 pin that triggers it<select id="bPin">${pinOptions(b.pin, pinUsage(state.matrix, state.buttons), b.name, false)}</select></label>
       <label>Mode<select id="bMode"><option value="toggle">Toggle (on/off)</option><option value="momentary">Momentary (hold)</option></select></label>
       <label>Lights<select id="bSide"><option value="both">Both</option><option value="left">Left only</option><option value="right">Right only</option></select></label>
       <label>When on<select id="bLayer"><option value="replace">Replace lower layers</option><option value="overlay">Lay lit LEDs on top</option></select></label>
       <label>Playback<select id="bRepeat"><option value="1">Loop while on</option><option value="0">Play once, hold end</option></select></label>
       <label id="bRelWrap">Stay on after release (ms)<input type="number" id="bRel" min="0" max="5000" step="50" value="${b.releaseMs || 0}"></label>
     </div>
+
+    <div class="pinwarn">${warnHtml(pinProblems(state.matrix, state.buttons).filter((w) => w.includes('GPIO ' + b.pin + ' ')))}</div>
 
     <h3>Describe the animation <span class="badge" id="aiBadge">checking AI…</span></h3>
     <textarea id="bPrompt" rows="3" placeholder="e.g. red light that fills from the inside out, then pulses twice">${esc(b.prompt || '')}</textarea>
@@ -303,7 +378,7 @@ function renderEditor() {
   $('#bMode').value = b.mode; $('#bSide').value = b.side; $('#bLayer').value = b.layer; $('#bRepeat').value = b.repeat ? '1' : '0';
   $('#bRelWrap').hidden = b.mode === 'toggle';
   $('#bName').oninput = (e) => { b.name = e.target.value || 'Button'; renderList(); renderBar(); save(); };
-  $('#bPin').oninput = (e) => { b.pin = Math.max(0, Math.min(48, +e.target.value | 0)); renderList(); save(); };
+  $('#bPin').onchange = (e) => { b.pin = +e.target.value; renderList(); renderEditor(); renderOutputs(); save(); };
   $('#bMode').onchange = (e) => { b.mode = e.target.value; inputs.delete(b.id); $('#bRelWrap').hidden = b.mode === 'toggle'; buttonsChanged(); };
   $('#bSide').onchange = (e) => { b.side = e.target.value; buttonsChanged(); };
   $('#bLayer').onchange = (e) => { b.layer = e.target.value; save(); };
@@ -440,7 +515,6 @@ function renderSteps(b) {
 }
 
 // animation loop
-let lastActiveSig = '';
 function tick(ts) {
   const dt = Math.min(100, ts - lastTs);
   lastTs = ts;
@@ -471,10 +545,10 @@ function tick(ts) {
 let sketch = '';
 function syncHwInputs() {
   const m = state.matrix;
-  $('#dataPin').value = m.dataPin; $('#dataPinR').value = m.dataPinR; $('#ledType').value = m.ledType;
+  $('#ledType').value = m.ledType;
   $('#colorOrder').value = m.colorOrder; $('#maxMa').value = m.maxMilliamps;
 }
-[['#dataPin', 'dataPin', true], ['#dataPinR', 'dataPinR', true], ['#ledType', 'ledType'], ['#colorOrder', 'colorOrder'], ['#maxMa', 'maxMilliamps', true]].forEach(([sel, key, isNum]) => {
+[['#ledType', 'ledType'], ['#colorOrder', 'colorOrder'], ['#maxMa', 'maxMilliamps', true]].forEach(([sel, key, isNum]) => {
   $(sel).addEventListener('input', (e) => { state.matrix[key] = isNum ? +e.target.value : e.target.value; save(); renderCode(); });
 });
 function highlight(src) {
@@ -488,8 +562,9 @@ function renderCode() {
   const n = layout.leds.length;
   const sides = state.matrix.lights === 'both' ? 2 : 1;
   $('#codeInfo').textContent = `taillight.ino · ${n} LEDs × ${sides} light${sides > 1 ? 's' : ''} · ${state.buttons.length} buttons · ${sketch.split('\n').length} lines`;
-  $('#dataPinR').closest('label').hidden = sides === 1 && state.matrix.lights === 'left';
-  $('#dataPin').closest('label').hidden = sides === 1 && state.matrix.lights === 'right';
+  const usage = [...pinUsage(state.matrix, state.buttons)].sort((a, b) => a[0] - b[0]);
+  $('#pinTable').innerHTML = usage.map(([p, who]) => `<span class="p">GPIO ${p}</span><span class="w">${who.map((w) => String(w).replace(/[&<>]/g, '')).join(', ')}</span>`).join('');
+  $('#codeWarn').innerHTML = warnHtml(pinProblems(state.matrix, state.buttons));
   const amps = (n * sides * 60) / 1000;
   $('#powerInfo').textContent = `Worst case (all white): ${amps.toFixed(1)} A. Code caps it at ${(state.matrix.maxMilliamps / 1000).toFixed(1)} A, so size your 5V supply for at least that.`;
 }
@@ -528,4 +603,5 @@ renderList();
 renderBar();
 renderEditor();
 renderBuild();
+renderOutputs();
 requestAnimationFrame(tick);

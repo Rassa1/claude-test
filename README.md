@@ -13,6 +13,7 @@ python3 -m http.server 8000
 ## How it works
 1. **Build matrix** – rows, LEDs/meter, row length, row spacing. Shape presets (stagger, taper, slant, arc, random shift), drag any row sideways, set per-row LED counts, and pick the wiring (zig-zag / same direction, first-LED corner).
    Choose two mirrored lights (left + right) or a single light.
+   **Data lines:** split big lights over several ESP32 output pins – give each line some rows (row chips or the row table), pick its pin per light. Up to 8 lines total (ESP32 RMT limit).
 2. **Buttons & animate** – each button (Running, Brake, Left/Right turn, Hazards, or your own) has:
    - mode: **toggle** (press on/off) or **momentary** (on while held, optional “stay on after release” for pulsing car indicator wires)
    - which light(s) it drives (both / left / right)
@@ -30,6 +31,7 @@ Animations: solid, off, sequential sweep, blink/hazard, brake flash, scanner, br
 - `js/engine.js` – buttons, layering, two-light scene
 - `js/ai.js` – Claude interpretation (claude.ai artifact runtime) with keyword fallback
 - `js/custom.js` – formula language compiled to JS and C++
+- `js/pins.js` – ESP32 pin list, conflict checks
 - `js/codegen.js` – Arduino sketch generator
 - `js/app.js` – UI
 
