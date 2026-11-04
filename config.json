@@ -3,8 +3,11 @@
   "timezone": "America/New_York",
   "staleAfterMinutes": 45,
   "waitingExpiresMinutes": 20,
+  "lateMinutes": 4,
+  "dwellMinutes": 1,
   "shuttles": [
-    { "id": "A", "name": "Shuttle A" }
+    { "id": "A", "name": "Shuttle A", "schedule": { "start": "07:30", "end": "18:30", "everyMinutes": 40 } },
+    { "id": "B", "name": "Shuttle B", "schedule": { "start": "07:50", "end": "18:10", "everyMinutes": 40 } }
   ],
   "stops": [
     { "id": "main-gate",  "name": "Main Gate",        "lat": 40.0000, "lng": -75.0000, "minsFromPrev": 7 },

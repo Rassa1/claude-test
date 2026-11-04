@@ -1,0 +1,1207 @@
+<title>Shuttle Simulator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Semi+Condensed:wght@500;600&display=swap">
+<style>
+/* Layout: one narrow column like a transit sign: status first, then the big ETA, then actions.
+   Type: condensed signage face for times and headings, hyperlegible face for everything else. */
+:root {
+  --bg: #eef1f5;        /* page */
+  --card: #ffffff;      /* panels */
+  --ink: #141a24;       /* text */
+  --muted: #5a6475;     /* secondary text */
+  --line: #d8dee7;      /* borders, route casing */
+  --route: #1e4fc2;     /* route line, primary actions */
+  --route-ink: #ffffff; /* text on route color */
+  --now: #11804f;       /* shuttle is here */
+  --late: #c4291f;      /* behind schedule */
+  --late-bg: #fdecea;
+  --ok-bg: #e5f4ec;
+  --font-sign: "Barlow Semi Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1118; --card: #161c26; --ink: #e8edf4; --muted: #98a3b5; --line: #2a3342;
+    --route: #6f97ff; --route-ink: #0b1020; --now: #3fcb8b; --late: #ff6f61; --late-bg: #3a1716; --ok-bg: #12301f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1118; --card: #161c26; --ink: #e8edf4; --muted: #98a3b5; --line: #2a3342;
+  --route: #6f97ff; --route-ink: #0b1020; --now: #3fcb8b; --late: #ff6f61; --late-bg: #3a1716; --ok-bg: #12301f;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 var(--font-body); }
+.site-header { background: var(--route); color: var(--route-ink); padding-block: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.site-header a { color: inherit; text-decoration: none; font: 600 20px/1 var(--font-sign); letter-spacing: .02em; }
+.site-main { max-width: 560px; margin: 0 auto; padding-block: 16px 32px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.site-footer { text-align: center; color: var(--muted); font-size: 13px; padding: 0 16px 24px; }
+
+.shuttle-app { position: relative; }
+.shuttle-app .views { display: flex; flex-direction: column; gap: 12px; }
+.shuttle-app h1 { font: 600 34px/1.05 var(--font-sign); margin: 0; text-wrap: balance; }
+.shuttle-app h2 { font: 600 14px/1 var(--font-sign); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 14px 0 0; }
+.eyebrow { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+a { color: var(--route); }
+
+.bus-status { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; }
+.pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+.pill.late { color: var(--late); background: var(--late-bg); }
+.pill.ok { color: var(--now); background: var(--ok-bg); }
+
+.eta { display: flex; flex-direction: column; align-items: flex-end; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.eta-num { font: 600 30px/1 var(--font-sign); }
+.eta-num small { font-size: .55em; font-weight: 500; }
+.eta-sub { font-size: 12px; color: var(--muted); }
+.eta.now .eta-num { color: var(--now); }
+.eta.late .eta-num, .eta.late .eta-sub { color: var(--late); font-weight: 700; }
+.eta.approx .eta-num { color: var(--muted); }
+
+.eta-card { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: var(--card);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+.eta-card .eta-num { font-size: 46px; }
+.eta-card.is-late { border-color: var(--late); box-shadow: inset 4px 0 0 var(--late); }
+.eta-card .note { font-size: 14px; margin-top: 2px; }
+.eta-card.is-late .note { color: var(--late); font-weight: 700; }
+
+.actions { display: flex; flex-direction: column; gap: 8px; }
+.btn { display: block; width: 100%; font: 700 17px/1.2 var(--font-body); padding: 14px; border-radius: var(--radius); cursor: pointer;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink); text-align: center; }
+.btn.primary { background: var(--route); border-color: var(--route); color: var(--route-ink); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid var(--route); outline-offset: 2px; }
+.btn .count { font-weight: 400; font-size: 14px; color: var(--muted); }
+.other-stops summary { cursor: pointer; color: var(--route); font-weight: 700; padding: 6px 0; }
+.other-stops .actions { margin-top: 6px; }
+
+.stop-list, .feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.stop-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; background: var(--card);
+  border: 1px solid var(--line); border-radius: var(--radius); color: inherit; text-decoration: none; }
+.stop-row > span { display: flex; flex-direction: column; min-width: 0; }
+.stop-name { font-weight: 700; }
+.feed li { display: flex; gap: 8px; }
+.feed li .muted { font-variant-numeric: tabular-nums; min-width: 4.5em; }
+
+/* route map */
+.route-map { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px; }
+.route-map svg { display: block; width: 100%; height: auto; }
+.route-line { fill: none; stroke: var(--route); stroke-width: 7; stroke-linejoin: round; opacity: .9; }
+.route-arrow { fill: none; stroke: var(--route-ink); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.map-stop .stop-dot { fill: var(--card); stroke: var(--ink); stroke-width: 3; }
+.map-stop .stop-ring { fill: none; stroke: none; }
+.map-stop text { font: 600 12px var(--font-body); fill: var(--ink); paint-order: stroke; stroke: var(--card); stroke-width: 4px; stroke-linejoin: round; }
+.map-stop.here .stop-dot { fill: var(--ink); }
+.map-stop.here .stop-ring { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 3 3; }
+.map-stop.here text { font-weight: 800; }
+.bus, .ghost { transition: transform 1s linear; }
+.bus rect { fill: var(--ink); stroke: var(--card); stroke-width: 2; }
+.bus text { font: 700 13px var(--font-sign); fill: var(--card); }
+.bus.late rect { fill: var(--late); }
+.bus.dim { opacity: .35; }
+.ghost circle { fill: none; stroke: var(--muted); stroke-width: 2; stroke-dasharray: 4 3; }
+.ghost text { font: 700 10px var(--font-sign); fill: var(--muted); }
+.map-legend { margin: -6px 0 0; }
+
+.toast { position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); max-width: 528px; margin: 0 auto; z-index: 20;
+  padding: 12px 16px; border-radius: var(--radius); background: var(--ink); color: var(--bg); text-align: center; font-weight: 700; }
+@media (prefers-reduced-motion: reduce) { .bus, .ghost { transition: none; } }
+
+/* Simulator layout: control-room board on the left (map, controls, scores, log), two phones on the right
+   running the real rider app. Shares tokens with style.css. */
+.sim-body { min-height: 100%; }
+.sim-top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
+  background: var(--route); color: var(--route-ink); padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.sim-body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--route); }
+.sim-title { font: 600 22px/1 var(--font-sign); letter-spacing: .02em; margin: 0; }
+.sim-clock { font: 600 30px/1 var(--font-sign); font-variant-numeric: tabular-nums; margin-left: auto; min-width: 5.2em; text-align: right; }
+.transport { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tbtn { font: 700 14px/1 var(--font-body); padding: 9px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--route-ink) 45%, transparent); background: transparent; color: var(--route-ink); }
+.tbtn[aria-pressed="true"] { background: var(--route-ink); color: var(--route); }
+.tbtn:focus-visible, .cbtn:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.speed { display: flex; gap: 4px; }
+
+.sim-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; max-width: 1360px; margin: 0 auto; padding-block: 16px 32px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); align-items: start; }
+.board { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
+.panel h2 { font: 600 14px/1 var(--font-sign); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.panel .route-map { border: 0; padding: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; background: var(--ink); }
+.legend i.dash { background: none; border: 2px dashed var(--muted); border-radius: 50%; width: 14px; height: 14px; }
+.legend i.red { background: var(--late); }
+.check { display: inline-flex; gap: 6px; align-items: center; font-size: 14px; cursor: pointer; }
+
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.fleet { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.fleet li { display: grid; grid-template-columns: 6.5em 1fr; gap: 0 10px; font-size: 14px; }
+.fleet li b:first-child { grid-row: span 2; font-family: var(--font-sign); font-size: 17px; }
+.fleet .late { color: var(--late); }
+.scores { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.scores div { display: flex; flex-direction: column-reverse; }
+.scores dt { font-size: 12px; color: var(--muted); }
+.scores dd { margin: 0; font: 600 28px/1.1 var(--font-sign); font-variant-numeric: tabular-nums; }
+
+.controls { display: flex; flex-direction: column; gap: 12px; }
+.slider { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 14px; }
+.slider input { grid-column: 1 / -1; width: 100%; accent-color: var(--route); }
+.slider output { font-variant-numeric: tabular-nums; font-weight: 700; }
+.btnrow { display: flex; flex-wrap: wrap; gap: 8px; }
+.cbtn { font: 700 14px/1.2 var(--font-body); padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+.cbtn.warn { color: var(--late); }
+.hint { font-size: 13px; color: var(--muted); margin: 0; }
+
+.log { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
+.log li { display: grid; grid-template-columns: 4.6em 1fr; gap: 8px; }
+.log time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.log .k-jam span, .log .k-prank span { color: var(--late); font-weight: 700; }
+.log .k-you span { color: var(--route); font-weight: 700; }
+
+.phones { display: flex; gap: 16px; align-items: start; }
+.phone { margin: 0; width: 340px; max-width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.phone figcaption { font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+.phone select { font: 600 15px var(--font-body); padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+.screen { height: 660px; overflow-y: auto; border: 10px solid var(--ink); border-radius: 30px; background: var(--bg); padding: 16px 14px;
+  transform: translateZ(0); /* keeps the app's toasts inside the phone */ }
+.screen .toast { left: 10px; right: 10px; bottom: 10px; font-size: 14px; }
+.screen h1 { font-size: 30px; }
+
+@media (max-width: 1120px) {
+  .sim-grid { grid-template-columns: minmax(0, 1fr); }
+  .phones { order: -1; flex-wrap: wrap; justify-content: center; }
+}
+@media (max-width: 420px) { .screen { height: 600px; border-width: 6px; border-radius: 22px; } .sim-clock { margin-left: 0; } }
+
+</style>
+<div class="sim-body">
+<header class="sim-top">
+  <h1 class="sim-title">Shuttle Simulator</h1>
+  <div class="transport">
+    <button class="tbtn" id="play" aria-pressed="false">Pause</button>
+    <div class="speed" role="group" aria-label="Simulation speed">
+      <button class="tbtn" data-speed="1" aria-pressed="false">1×</button>
+      <button class="tbtn" data-speed="10" aria-pressed="false">10×</button>
+      <button class="tbtn" data-speed="30" aria-pressed="true">30×</button>
+      <button class="tbtn" data-speed="60" aria-pressed="false">60×</button>
+    </div>
+  </div>
+  <div class="sim-clock" id="clock" aria-live="off">--:--</div>
+</header>
+<main class="sim-grid">
+  <div class="board">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Route map</h2>
+        <label class="check"><input type="checkbox" id="ghosts" checked> Show where shuttles really are</label>
+      </div>
+      <div id="bigmap"></div>
+      <p class="legend"><span><i></i>Where the app thinks each shuttle is</span><span><i class="dash"></i>Where it really is (only the simulator knows)</span><span><i class="red"></i>Behind schedule</span></p>
+    </section>
+    <div class="two">
+      <section class="panel">
+        <h2>Shuttles</h2>
+        <ul class="fleet" id="fleet"></ul>
+      </section>
+      <section class="panel">
+        <h2>How accurate is the app?</h2>
+        <dl class="scores">
+          <div><dt>typical ETA error</dt><dd id="s-median">—</dd></div>
+          <div><dt>ETAs within 2 min</dt><dd id="s-within">—</dd></div>
+          <div><dt>late shuttles flagged</dt><dd id="s-caught">—</dd></div>
+          <div><dt>false “behind schedule”</dt><dd id="s-false">—</dd></div>
+        </dl>
+      </section>
+    </div>
+    <section class="panel controls">
+      <h2>Try things</h2>
+      <label class="slider" for="tap">Riders who tap the QR page <output id="tapOut">30%</output><input type="range" id="tap" min="0" max="100" value="30"></label>
+      <label class="slider" for="gps">Riders sharing location <output id="gpsOut">0%</output><input type="range" id="gps" min="0" max="30" value="0"></label>
+      <div class="btnrow" id="jams"></div>
+      <div class="btnrow">
+        <button class="cbtn warn" id="prank">Send a fake report</button>
+        <button class="cbtn" id="skip">Skip ahead 15 min</button>
+      </div>
+      <div class="btnrow">
+        <label class="check"><input type="checkbox" id="history" checked> App has 10 days of past data</label>
+        <button class="cbtn" id="restart">Restart the morning</button>
+      </div>
+      <p class="hint">Set taps to 0% to see estimates from past data and the timetable alone. Use the phones to report yourself: tap “is here” when the dashed circle reaches your stop.</p>
+    </section>
+    <section class="panel">
+      <h2>What’s happening</h2>
+      <ol class="log" id="log"></ol>
+    </section>
+  </div>
+  <div class="phones">
+    <figure class="phone">
+      <figcaption><label for="stopPick">Phone that scanned the QR code at</label><select id="stopPick"></select></figcaption>
+      <div class="screen" id="phoneStop"></div>
+    </figure>
+    <figure class="phone">
+      <figcaption><label for="busPick">Phone that scanned the QR code inside</label><select id="busPick"></select></figcaption>
+      <div class="screen" id="phoneBus"></div>
+    </figure>
+  </div>
+</main>
+</div>
+<script>
+window.SHUTTLE_NO_AUTOBOOT = true;
+window.SHUTTLE_CONFIG = {"title":"Campus Shuttle","timezone":"America/New_York","staleAfterMinutes":45,"waitingExpiresMinutes":20,"lateMinutes":4,"dwellMinutes":1,"shuttles":[{"id":"A","name":"Shuttle A","schedule":{"start":"07:30","end":"18:30","everyMinutes":40}},{"id":"B","name":"Shuttle B","schedule":{"start":"07:50","end":"18:10","everyMinutes":40}}],"stops":[{"id":"main-gate","name":"Main Gate","lat":40,"lng":-75,"minsFromPrev":7},{"id":"library","name":"Library","lat":40.003,"lng":-75.002,"minsFromPrev":4},{"id":"dorms","name":"Residence Halls","lat":40.006,"lng":-75.001,"minsFromPrev":5},{"id":"athletics","name":"Athletics Center","lat":40.005,"lng":-74.997,"minsFromPrev":6},{"id":"station","name":"Train Station","lat":40.001,"lng":-74.995,"minsFromPrev":8}]};
+</script>
+<script>
+// Shuttle tracking core: turns rider reports into shuttle positions, ETAs and lateness.
+// Pure logic with an injectable clock and no I/O, so the same code runs in the server (Node),
+// the tests, and the in-browser simulator.
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.ShuttleCore = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  const MIN = 60_000;
+
+  function distM(a, b) {
+    const R = 6371000, r = Math.PI / 180;
+    const dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+  const median = a => { const s = [...a].sort((x, y) => x - y); return s.length % 2 ? s[s.length >> 1] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
+
+  function createTracker(config, { now = () => Date.now() } = {}) {
+    const N = config.stops.length;
+    const DWELL = config.dwellMinutes ?? 1;                 // minutes stopped at each stop
+    const LATE = config.lateMinutes ?? 4;                   // this far behind the timetable = "behind schedule"
+    const STALE = (config.staleAfterMinutes ?? 45) * MIN;
+    const WAIT_EXP = (config.waitingExpiresMinutes ?? 20) * MIN;
+    const HISTORY_DAYS = config.historyDays ?? 60;
+    const stopIdx = new Map(config.stops.map((s, i) => [s.id, i]));
+    const busIds = new Set(config.shuttles.map(b => b.id));
+    const cfgSeg = k => config.stops[k].minsFromPrev || 0;  // minutes driving into stop k from the stop before it
+
+    let events = [];                              // raw reports, last 24 h
+    let history = { arrivals: [], segs: [] };     // confirmed arrivals + real drive times, last HISTORY_DAYS
+    let version = 0;                              // bumps on every change (the server saves when it moves)
+    const hits = new Map(), lastRecorded = new Map();
+
+    // ---- local time (the school's timezone; servers often run in UTC) ----
+    const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone || undefined, hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', weekday: 'short' });
+    const lpCache = new Map(); // formatting is slow; cache per minute
+    function localParts(t) {
+      const key = Math.floor(t / MIN);
+      let r = lpCache.get(key);
+      if (!r) {
+        const p = Object.fromEntries(fmt.formatToParts(key * MIN).map(x => [x.type, x.value]));
+        r = { day: `${p.year}-${p.month}-${p.day}`, hour: +p.hour, mins: +p.hour * 60 + +p.minute, weekend: p.weekday === 'Sat' || p.weekday === 'Sun' };
+        if (lpCache.size > 5000) lpCache.clear();
+        lpCache.set(key, r);
+      }
+      return r;
+    }
+    const atLocalMinute = (t, m) => t - (t % MIN) + (m - localParts(t).mins) * MIN; // that local time, same day as t
+
+    // ---- timetable (optional): departures from the first stop; later stops follow configured drive times ----
+    const hm = s => { const [h, m] = String(s).split(':').map(Number); return h * 60 + m; };
+    const schedules = new Map(config.shuttles.map(b => {
+      const sc = b.schedule || config.schedule;
+      if (!sc) return [b.id, null];
+      const deps = sc.departures ? sc.departures.map(hm).sort((x, y) => x - y) : [];
+      if (!sc.departures) for (let m = hm(sc.start); m <= hm(sc.end); m += sc.everyMinutes) deps.push(m);
+      const period = sc.everyMinutes || (deps.length > 1 ? median(deps.slice(1).map((d, i) => d - deps[i])) : 60);
+      return [b.id, { deps, period }];
+    }));
+    const schedOffset = [-DWELL]; // timetable minutes from leaving stop 0 to arriving at stop j
+    for (let j = 1, acc = 0; j < N; j++) { acc += cfgSeg(j); schedOffset[j] = acc; acc += DWELL; }
+    const schedTimes = (bus, j, t) => (schedules.get(bus)?.deps || []).map(m => atLocalMinute(t, m + schedOffset[j]));
+    function schedNear(bus, j, t) { // timetable arrival at stop j closest to t
+      const sc = schedules.get(bus); let best = null;
+      for (const x of schedTimes(bus, j, t)) if (best == null || Math.abs(x - t) < Math.abs(best - t)) best = x;
+      return best != null && Math.abs(best - t) <= sc.period * MIN ? best : null;
+    }
+    const schedNext = (bus, j, t) => schedTimes(bus, j, t).find(x => x >= t) ?? null;
+    // when a shuttle that reached the first stop at `arrived` leaves it: waits for its timetable slot if early
+    function departFirst(bus, arrived) {
+      const ready = arrived + DWELL * MIN, sc = schedules.get(bus);
+      if (!sc) return ready;
+      const d = schedTimes(bus, 0, arrived).map(x => x + DWELL * MIN).find(x => x >= ready - sc.period * MIN / 2);
+      return d == null ? ready : Math.max(ready, d);
+    }
+    const serviceOver = (bus, t) => { const sc = schedules.get(bus); if (!sc) return false;
+      const last = schedTimes(bus, 0, t).at(-1); return last != null && t > last + sc.period * MIN; };
+
+    // ---- rate limiting ----
+    function limited(key, max, windowMs) {
+      const t = now(), arr = (hits.get(key) || []).filter(x => t - x < windowMs);
+      arr.push(t); hits.set(key, arr);
+      return arr.length > max;
+    }
+
+    // ---- position model ----
+    // An anchor {k, at} means the shuttle reached stop k at time `at`. A GPS fix between stops becomes an
+    // anchor at the stop it last left, with `fix` recording how far along the next segment it was.
+    function anchorOf(e) {
+      const k = stopIdx.get(e.stop);
+      if (e.type !== 'gps' || distM(e, config.stops[k]) < 50) return { k, at: e.t, e };
+      let best = null;
+      for (let to = 0; to < N; to++) {
+        const from = (to - 1 + N) % N, A = config.stops[from], B = config.stops[to];
+        const ab = distM(A, B) || 1, ap = distM(A, e), bp = distM(B, e);
+        const f = Math.min(1, Math.max(0, (ap * ap - bp * bp + ab * ab) / (2 * ab * ab)));
+        const off = ap + bp - ab; // 0 when exactly on the segment
+        if (!best || off < best.off) best = { from, to, f, off };
+      }
+      return { k: best.from, at: e.t - (DWELL + best.f * cfgSeg(best.to)) * MIN, e, approx: { f: best.f, to: best.to, t: e.t } };
+    }
+    function baseSegs(t) { // typical drive time into each stop: median of past days near this hour, else config
+      const h = localParts(t).hour;
+      return config.stops.map((_, k) => {
+        const all = history.segs.filter(x => x.to === k), near = all.filter(x => Math.abs(x.hour - h) <= 1);
+        const use = (near.length >= 3 ? near : all).slice(-30).map(x => x.mins);
+        return use.length >= 3 ? median(use) : cfgSeg(k);
+      });
+    }
+    function learnSegments(anchors, base, bus) { // blend today's observed drive times into the typical ones
+      const samples = Array.from({ length: N }, () => []);
+      for (let x = 1; x < anchors.length; x++) {
+        const a = anchors[x - 1], b = anchors[x], to = b.k;
+        if (to !== (a.k + 1) % N || a.approx || b.approx) continue;
+        const leave = a.k === 0 ? departFirst(bus, a.at) : a.at + DWELL * MIN; // minus any timetable wait
+        const mins = (b.at - leave) / MIN, ref = cfgSeg(to);
+        if (mins > 0.3 * ref && mins < 3 * ref + 2) samples[to].push(mins);
+      }
+      return samples.map((arr, k) => { const r = arr.slice(-3); return (base[k] + r.reduce((a, b) => a + b, 0)) / (r.length + 1); });
+    }
+    function travel(seg, i, j) { // minutes from arriving at stop i to arriving at stop j (a full loop if i === j)
+      let m = 0, k = i;
+      do { k = (k + 1) % N; m += DWELL + seg[k]; } while (k !== j);
+      return m;
+    }
+    function busModel(busId, t, stale, base) {
+      const evs = events.filter(e => e.bus === busId && (e.type === 'arrive' || e.type === 'gps') && t - e.t < 3 * 60 * MIN && e.t <= t);
+      const anchors = [], flagged = new Map(); // device -> when it sent an impossible report
+      const held = [];                           // lone reports that don't fit the timetable, waiting for support
+      const sc = schedules.get(busId);
+      for (const e of evs) {
+        if (e.t - (flagged.get(e.device) ?? -Infinity) < 60 * MIN) continue; // distrust that phone for an hour
+        const a = anchorOf(e), last = anchors[anchors.length - 1];
+        if (last && last.k === a.k && a.at - last.at < 5 * MIN) { // same stop again: one anchor, more reporters
+          last.devices.add(e.device); last.e = e;
+          if (a.approx) last.fix = a.approx;
+          continue;
+        }
+        if (e.type === 'arrive' && last && a.at - last.at < 45 * MIN) {
+          // a lone "arrive" the shuttle couldn't have made yet (wrong stop / prank) waits for a 2nd reporter
+          const elapsed = (a.at - last.at) / MIN, need = travel(learnSegments(anchors, base, busId), last.k, a.k);
+          if (elapsed < 0.5 * need - 2) {
+            const sus = (last.suspect ||= new Map()), who = sus.get(a.k) || new Set();
+            who.add(e.device); sus.set(a.k, who);
+            if (who.size < 2) { flagged.set(e.device, e.t); continue; }
+          }
+        } else if (e.type === 'arrive' && sc) {
+          // nothing recent to check against: a report far off the timetable waits until someone else's
+          // report agrees with it (the same stop, or a later stop it could plausibly have reached)
+          const sched = schedNear(busId, a.k, a.at);
+          if (sched == null || Math.abs(a.at - sched) > Math.max(12, 0.35 * sc.period) * MIN) {
+            const seg = learnSegments(anchors, base, busId);
+            const h = held.find(h => !h.devices.has(e.device) && (h.k === a.k ? a.at - h.at < 5 * MIN
+              : (x => x >= 0.5 * travel(seg, h.k, a.k) - 2 && x <= 1.5 * travel(seg, h.k, a.k) + 5)((a.at - h.at) / MIN)));
+            if (!h) { held.push({ ...a, devices: new Set([e.device]) }); continue; }
+            held.splice(held.indexOf(h), 1);
+            if (h.k === a.k) { h.devices.add(e.device); h.e = e; anchors.push(h); continue; }
+            anchors.push(h);
+          }
+        }
+        anchors.push({ ...a, devices: new Set([e.device]) });
+      }
+      const seg = learnSegments(anchors, base, busId);
+      let cur = anchors[anchors.length - 1];
+      if (!cur || t - cur.e.t > stale) return { seg, anchors, cur: null };
+      const fix = cur.fix || cur.approx; // GPS between stops: when it left stop k, from today's drive time
+      if (fix) cur = { ...cur, dep: fix.t - fix.f * seg[fix.to] * MIN };
+      return { seg, anchors, cur };
+    }
+    const leaveTime = (bus, cur) => cur.dep ?? (cur.k === 0 ? departFirst(bus, cur.at) : cur.at + DWELL * MIN);
+    // upcoming stops: {k, arrive, depart}. `waitSince[k]`: since when 2+ people have been waiting at stop k with no
+    // arrival reported. If they were already waiting before the shuttle was due, it hasn't come yet.
+    function* walk(bus, seg, cur, t, waitSince = []) {
+      let i = cur.k, dep = leaveTime(bus, cur);
+      for (let n = 0; n < N * 3; n++) {
+        const k = (i + 1) % N, w = waitSince[k];
+        let arrive = dep + seg[k] * MIN;
+        if (w != null && arrive < t && w <= arrive - 0.5 * MIN) arrive = t + MIN;
+        const depart = k === 0 ? departFirst(bus, arrive) : arrive + DWELL * MIN;
+        yield { k, arrive, depart, leg: (arrive - dep) / MIN };
+        i = k; dep = depart;
+      }
+    }
+    function liveEta(bus, seg, cur, j, t, waitSince) {
+      const leave = leaveTime(bus, cur);
+      if (cur.k === j && cur.dep == null && t <= leave + 0.5 * MIN) return { mins: 0, at: cur.at, ...(leave - t > 2 * MIN && { departs: leave }) };
+      let first = true;
+      for (const v of walk(bus, seg, cur, t, waitSince)) {
+        if (v.k !== j) continue;
+        if (v.arrive >= t) return { mins: (v.arrive - t) / MIN, at: v.arrive };
+        // expected already but nobody reported it: say "due" for a while instead of jumping a whole loop
+        const over = (t - v.arrive) / MIN;
+        if (first && over < Math.max(5, 0.5 * v.leg)) return { mins: 1, at: t + MIN, overdue: over };
+        first = false;
+      }
+      return null;
+    }
+    function lateness(bus, j, eta) {
+      const sched = schedNear(bus, j, eta.at);
+      if (sched != null) { const by = Math.round((eta.at - sched) / MIN); return { late: by >= LATE, lateBy: by }; }
+      return { late: (eta.overdue ?? 0) >= LATE, lateBy: null };
+    }
+    function positionAt(bus, seg, cur, t, waitSince) { // estimated {lat, lng} for the map
+      const S = config.stops, lerp = (a, b, f) => ({ lat: a.lat + (b.lat - a.lat) * f, lng: a.lng + (b.lng - a.lng) * f });
+      let prevK = cur.k, prevDep = leaveTime(bus, cur), first = true;
+      const at = k => ({ lat: S[k].lat, lng: S[k].lng, stop: S[k].id, atStop: true });
+      if (t <= prevDep) return at(prevK);
+      for (const v of walk(bus, seg, cur, t, waitSince)) {
+        if (t < v.arrive) return { ...lerp(S[prevK], S[v.k], (t - prevDep) / (v.arrive - prevDep)), from: S[prevK].id, to: S[v.k].id };
+        if (first && (t - v.arrive) / MIN < Math.max(5, 0.5 * v.leg)) return { ...lerp(S[prevK], S[v.k], 0.97), from: S[prevK].id, to: S[v.k].id, due: true };
+        if (t < v.depart) return at(v.k);
+        prevK = v.k; prevDep = v.depart; first = false;
+      }
+      return null;
+    }
+
+    // ---- history ----
+    function addArrival(bus, k, t, inferred) {
+      const key = `${bus}|${k}`;
+      if (Math.abs(t - (lastRecorded.get(key) ?? -Infinity)) < 5 * MIN) return false;
+      if (history.arrivals.some(a => a.bus === bus && a.k === k && Math.abs(a.t - t) < 5 * MIN)) return false;
+      lastRecorded.set(key, t);
+      const lp = localParts(t);
+      history.arrivals.push({ t, day: lp.day, weekend: lp.weekend, m: lp.mins, bus, stop: config.stops[k].id, k, ...(inferred && { inferred }) });
+      version++;
+      return true;
+    }
+    // save trustworthy arrivals: 2+ reporters, or followed by a later sighting (a lone prank that gets
+    // contradicted is dropped). Stops nobody reported between two sightings are filled in.
+    function recordHistory() {
+      const t = now(), base = baseSegs(t);
+      for (const b of config.shuttles) {
+        const { anchors } = busModel(b.id, t, Infinity, base);
+        const ok = (x, i) => x && !x.approx && t - x.at >= 2 * MIN && (x.devices.size >= 2 || i < anchors.length - 1);
+        anchors.forEach((x, i) => {
+          if (!ok(x, i) || !addArrival(b.id, x.k, x.at)) return;
+          const prev = anchors[i - 1];
+          if (!ok(prev, i - 1)) return;
+          const hops = (x.k - prev.k + N) % N, mins = (x.at - prev.at) / MIN;
+          if (hops === 1) {
+            const drive = (x.at - (prev.k === 0 ? departFirst(b.id, prev.at) : prev.at + DWELL * MIN)) / MIN;
+            if (drive > 0.3 * cfgSeg(x.k) && drive < 3 * cfgSeg(x.k) + 2)
+              history.segs.push({ t: x.at, to: x.k, hour: localParts(x.at).hour, mins: +drive.toFixed(2) });
+          } else if (hops > 1) {
+            const expect = travel(base, prev.k, x.k);
+            if (mins < 0.6 * expect || mins > 1.6 * expect) return;
+            let acc = 0;
+            for (let k = (prev.k + 1) % N; k !== x.k; k = (k + 1) % N) {
+              acc += DWELL + base[k];
+              addArrival(b.id, k, prev.at + (acc / expect) * (x.at - prev.at), true);
+            }
+          }
+        });
+      }
+    }
+    // "usually comes in ~N min": per past day (same weekday/weekend type when there's enough), the first
+    // arrival at this stop after the current time of day; the median wait
+    function typicalEta(stopId, t) {
+      const { day, mins, weekend } = localParts(t);
+      const pool = history.arrivals.filter(a => a.stop === stopId && a.day !== day);
+      const same = pool.filter(a => a.weekend === weekend);
+      const use = new Set(same.map(a => a.day)).size >= 3 ? same : pool;
+      const days = new Map();
+      for (const a of use) if (a.m >= mins - 1 && a.m - mins <= 90) days.set(a.day, Math.min(days.get(a.day) ?? Infinity, a.m - mins));
+      const nDays = new Set(use.map(a => a.day)).size;
+      if (days.size < 3 || days.size < nDays / 2) return null;
+      return { mins: Math.max(0, Math.round(median([...days.values()]))), days: days.size };
+    }
+
+    // ---- public state ----
+    function buildState() {
+      const t = now(), base = baseSegs(t);
+      const models = config.shuttles.map(b => ({ b, ...busModel(b.id, t, STALE, base) }));
+      const lastArrivals = config.stops.map(s => events.findLast(e => e.stop === s.id && e.type === 'arrive' && e.t <= t));
+      const waits = config.stops.map((s, j) => events.filter(e => e.stop === s.id && e.type === 'wait' && t - e.t < WAIT_EXP && e.t <= t
+        && (!lastArrivals[j] || e.t > lastArrivals[j].t)));
+      const waitSince = waits.map(w => { // when a 2nd person was waiting too (one silent waiter is weak evidence)
+        const firsts = [...new Map(w.map(e => [e.device, e.t])).values()].sort((a, b) => a - b);
+        return firsts.length >= 2 ? firsts[1] : null;
+      });
+      const stops = config.stops.map((s, j) => {
+        const lastArrival = lastArrivals[j];
+        const waiters = new Set(waits[j].map(e => e.device));
+        const etas = [];
+        for (const m of models) {
+          if (!m.cur) continue;
+          const e = liveEta(m.b.id, m.seg, m.cur, j, t, waitSince);
+          if (e) etas.push({ bus: m.b.id, mins: Math.round(e.mins), source: 'live', ...lateness(m.b.id, j, e), ...(e.departs && { departs: e.departs }) });
+        }
+        if (!etas.length) { const ty = typicalEta(s.id, t); if (ty) etas.push({ ...ty, source: 'typical' }); }
+        if (!etas.length) for (const m of models) {
+          const x = schedNext(m.b.id, j, t);
+          if (x != null && x - t < 3 * 60 * MIN) etas.push({ bus: m.b.id, mins: Math.round((x - t) / MIN), source: 'schedule' });
+        }
+        etas.sort((a, b) => a.mins - b.mins);
+        return { id: s.id, waiting: waiters.size, lastArrival: lastArrival?.t || null, etas };
+      });
+      const buses = models.map(m => {
+        const out = { id: m.b.id, name: m.b.name, pos: null, scheduled: schedules.has(m.b.id) && !!schedules.get(m.b.id) };
+        if (!m.cur || serviceOver(m.b.id, t)) return out;
+        const e = m.cur.e;
+        out.pos = { stop: e.stop, at: e.t, via: e.type, reporters: m.cur.devices.size };
+        out.est = positionAt(m.b.id, m.seg, m.cur, t, waitSince);
+        // the stop riders should tap next: the one it's at (if not yet reported) or heading to
+        const nextId = out.est?.atStop && out.est.stop !== e.stop ? out.est.stop
+          : out.est?.to || config.stops[(m.cur.k + 1) % N].id;
+        out.next = nextId;
+        const ne = stops[stopIdx.get(nextId)].etas.find(x => x.bus === m.b.id && x.source === 'live');
+        if (ne) { out.late = ne.late; out.lateBy = ne.lateBy; }
+        return out;
+      });
+      const recent = events.filter(e => e.type !== 'gps' && e.t <= t).slice(-15).reverse()
+        .map(({ t, type, stop, bus }) => ({ t, type, stop, bus }));
+      return { now: t, buses, stops, recent };
+    }
+
+    // ---- reports ----
+    function handleReport(body, ip = '') {
+      const { type, stop, bus, lat, lng } = body;
+      const device = String(body.device || '').slice(0, 64) || ip;
+      if (!['wait', 'arrive', 'gps'].includes(type)) return [400, 'bad type'];
+      if (limited('ip:' + ip, 40, MIN) || limited('dev:' + device, 20, MIN)) return [429, 'Too many reports. Try again in a minute.'];
+      const e = { t: now(), type, device };
+      const hasGeo = Number.isFinite(lat) && Number.isFinite(lng);
+      if (hasGeo) { e.lat = +lat.toFixed(5); e.lng = +lng.toFixed(5); }
+      if (type === 'gps') {
+        if (!hasGeo || !busIds.has(bus)) return [400, 'need bus + location'];
+        let best = null;
+        for (const s of config.stops) { const d = distM(e, s); if (!best || d < best.d) best = { s, d }; }
+        if (best.d > 3000) return [400, 'You seem to be off the shuttle route.'];
+        e.bus = bus; e.stop = best.s.id;
+        if (limited('gps:' + device, 1, 20_000)) return [200, 'ok'];
+      } else {
+        if (!stopIdx.has(stop)) return [400, 'unknown stop'];
+        e.stop = stop;
+        if (type === 'arrive') {
+          e.bus = busIds.has(bus) ? bus : config.shuttles[0].id;
+          if (limited(`arr:${device}:${stop}`, 1, 3 * MIN)) return [200, 'already counted'];
+          if (hasGeo && distM(e, config.stops[stopIdx.get(stop)]) > 800) return [400, 'You seem far from that stop.'];
+        }
+        if (type === 'wait' && limited(`wait:${device}:${stop}`, 1, 5 * MIN)) return [200, 'already counted'];
+      }
+      events.push(e); version++;
+      return [200, 'ok'];
+    }
+
+    function trim() {
+      const t = now();
+      events = events.filter(e => t - e.t < 24 * 60 * MIN);
+      const hcut = t - HISTORY_DAYS * 24 * 60 * MIN;
+      history.arrivals = history.arrivals.filter(a => a.t > hcut);
+      history.segs = history.segs.filter(x => x.t > hcut);
+      for (const [k, arr] of hits) { const keep = arr.filter(x => t - x < 10 * MIN); keep.length ? hits.set(k, keep) : hits.delete(k); }
+    }
+
+    return {
+      config, MIN, buildState, handleReport, recordHistory, trim, localParts, departFirst, schedTimes, schedNear, serviceOver,
+      get version() { return version; },
+      exportData: () => ({ events, history }),
+      importData: d => { if (d.events) events = d.events; if (d.history) history = { arrivals: [], segs: [], ...d.history }; },
+      reset: () => { events = []; hits.clear(); version++; },
+      resetHistory: () => { history = { arrivals: [], segs: [] }; lastRecorded.clear(); version++; },
+    };
+  }
+
+  return { createTracker, distM, MIN };
+});
+
+</script>
+<script>
+// A simulated campus: shuttles drive the loop with random traffic, students show up at stops and
+// (sometimes) tap the QR pages, riders may share location, pranksters send fake reports.
+// Everything is fed into a tracker from core.js, and every ETA the app shows is scored against what
+// really happened. Used by `npm run sim` (Node) and the interactive simulator page (browser).
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.ShuttleWorld = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  const MIN = 60_000, STEP = 15_000;
+  function rng(seed) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32); }
+
+  // clock: { t } shared with the tracker's now(); start: when the day begins (ms)
+  function createWorld({ tracker, clock, start, seed = 1, opts = {}, endAt = Infinity }) {
+    const config = tracker.config, S = config.stops, N = S.length, DWELL = config.dwellMinutes ?? 1;
+    const rand = rng(seed);
+    const o = Object.assign({ waitTap: 0.4, hereTap: 0.3, rideTap: 0.1, gpsShare: 0, studentRate: 0.25, jamChance: 0.04 }, opts);
+    const pt = i => ({ lat: S[i].lat, lng: S[i].lng });
+    const log = [], listeners = [];
+    const say = (text, kind = 'info') => { const x = { t: clock.t, text, kind }; log.push(x); if (log.length > 200) log.shift(); listeners.forEach(f => f(x)); };
+    clock.t = start;
+
+    // ---- shuttles: each shows up at the first stop just before its first timetable departure ----
+    const buses = config.shuttles.map((b, i) => {
+      const first = tracker.schedTimes(b.id, 0, start)[0];
+      const arriveAt = (first ?? start + i * 20 * MIN) - (1 + rand() * 3) * MIN;
+      return { id: b.id, name: b.name, mode: 'off', k: 0, t0: start, t1: arriveAt, extra: 0, onboard: [] };
+    });
+    const waiting = Array.from({ length: N }, () => []);
+    let nextId = 0, rejected = 0;
+    const student = () => ({ id: `s${seed}-${nextId}`, ip: `10.${(nextId >> 8) & 255}.${nextId & 255}.${nextId++ % 7}`, shares: rand() < o.gpsShare });
+    const send = (body, who) => { const [code, msg] = tracker.handleReport({ ...body, device: who.id }, who.ip); if (code !== 200) rejected++; return [code, msg]; };
+
+    // ---- scoring: every ETA shown is checked against the next real arrival at that stop ----
+    const pending = Array.from({ length: N }, () => []);
+    const score = { errors: { live: [], typical: [], schedule: [] }, none: 0, late: { tp: 0, fp: 0, fn: 0, tn: 0 } };
+    function observe(state) {
+      state.stops.forEach((st, j) => {
+        pending[j].push({ p: clock.t, e: st.etas[0] || null });
+        const here = buses.find(b => b.mode === 'stop' && b.k === j); // a shuttle is sitting there right now
+        if (here) resolve(j, here, here.t0);
+      });
+    }
+    function resolve(j, bus, T) {
+      const sched = tracker.schedNear(bus.id, j, T);
+      const reallyLate = sched != null && (T - sched) / MIN >= (config.lateMinutes ?? 4);
+      for (const { p, e } of pending[j]) {
+        if (!e) { score.none++; continue; }
+        score.errors[e.source].push(Math.abs(e.mins - Math.max(0, T - p) / MIN));
+        if (e.source === 'live' && e.bus === bus.id && T - p < 20 * MIN) {
+          const said = !!e.late;
+          score.late[said ? (reallyLate ? 'tp' : 'fp') : (reallyLate ? 'fn' : 'tn')]++;
+        }
+      }
+      pending[j] = [];
+    }
+
+    // ---- shuttle movement ----
+    function arrive(b, k) {
+      b.mode = 'stop'; b.k = k; b.t0 = clock.t;
+      if (k === 0 && tracker.serviceOver(b.id, clock.t)) { b.mode = 'done'; say(`${b.name} finished for the day`); return; }
+      b.t1 = k === 0 ? tracker.departFirst(b.id, clock.t) : clock.t + DWELL * MIN;
+      resolve(k, b, clock.t);
+      let taps = 0;
+      for (const st of waiting[k]) if (rand() < (st.engaged ? Math.min(1, o.hereTap * 2) : o.hereTap)) { send({ type: 'arrive', stop: S[k].id, bus: b.id, ...pt(k) }, st); taps++; }
+      for (const r of b.onboard) if (rand() < o.rideTap) { send({ type: 'arrive', stop: S[k].id, bus: b.id }, r); taps++; }
+      const boarded = waiting[k].length;
+      b.onboard = b.onboard.filter(() => rand() > 0.5).concat(waiting[k]);
+      waiting[k] = [];
+      say(`${b.name} at ${S[k].name}: ${boarded} boarded, ${taps} tapped “here”`, 'bus');
+    }
+    function depart(b) {
+      const to = (b.k + 1) % N;
+      let mins = S[to].minsFromPrev * (0.8 + rand() * 0.6);
+      if (rand() < o.jamChance) { mins += 5 + rand() * 7; }
+      mins += b.extra; b.extra = 0;
+      b.mode = 'drive'; b.from = b.k; b.k = to; b.t0 = clock.t; b.t1 = clock.t + mins * MIN;
+    }
+    function positionOf(b, t = clock.t) {
+      if (b.mode === 'off' || b.mode === 'done') return null;
+      if (b.mode === 'stop') return pt(b.k);
+      const f = Math.min(1, (t - b.t0) / (b.t1 - b.t0)), p = pt(b.from), q = pt(b.k);
+      return { lat: p.lat + (q.lat - p.lat) * f, lng: p.lng + (q.lng - p.lng) * f };
+    }
+
+    function step() {
+      clock.t += STEP;
+      for (let s = 0; s < N; s++) if (rand() < o.studentRate * STEP / MIN) {
+        const st = student(); waiting[s].push(st);
+        if (rand() < o.waitTap) { st.engaged = true; send({ type: 'wait', stop: S[s].id, ...pt(s) }, st); }
+      }
+      for (const b of buses) {
+        if (b.mode === 'off' && clock.t >= b.t1) arrive(b, 0);
+        else if (b.mode === 'stop' && clock.t >= b.t1) depart(b);
+        else if (b.mode === 'drive' && clock.t >= b.t1) arrive(b, b.k);
+        const p = positionOf(b);
+        if (p) for (const r of b.onboard) if (r.shares) send({ type: 'gps', bus: b.id, ...p }, r);
+      }
+      if (Math.round(clock.t / STEP) % 8 === 0) tracker.recordHistory(); // every 2 min
+    }
+    // advance to time t (scoring every 30 s if `scoring`)
+    function runUntil(t, scoring = true) {
+      while (clock.t + STEP <= Math.min(t, endAt)) {
+        step();
+        if (scoring && Math.round(clock.t / STEP) % 2 === 0) observe(tracker.buildState());
+      }
+    }
+
+    return {
+      buses, waiting, log, score, opts: o, onLog: f => listeners.push(f),
+      positionOf, runUntil, step, observe,
+      get rejected() { return rejected; },
+      jam(busId, mins = 10) {
+        const b = buses.find(x => x.id === busId); if (!b) return;
+        if (b.mode === 'drive') b.t1 += mins * MIN; else b.extra += mins;
+        say(`Traffic jam: ${b.name} delayed ${mins} min`, 'jam');
+      },
+      prank(withLocation = false) {
+        const b = buses.find(x => x.mode !== 'off' && x.mode !== 'done') || buses[0];
+        const far = (b.k + 2 + Math.floor(rand() * (N - 3))) % N; // a stop the shuttle is nowhere near
+        const [code, msg] = send({ type: 'arrive', stop: S[far].id, bus: b.id, ...(withLocation ? { lat: 40.1, lng: -75.2 } : {}) }, { id: 'prankster', ip: '10.66.6.6' });
+        say(`Prank: fake “${b.name} at ${S[far].name}”${code === 200 ? '' : ` (rejected: ${msg})`}`, 'prank');
+      },
+    };
+  }
+
+  function summarize(score) {
+    const all = [...score.errors.live, ...score.errors.typical, ...score.errors.schedule].sort((a, b) => a - b);
+    const total = all.length + score.none, L = score.late;
+    const pct = (a, b) => (b ? Math.round(100 * a / b) : null);
+    return {
+      coverage: pct(all.length, total), within2: pct(all.filter(e => e <= 2).length, all.length),
+      within5: pct(all.filter(e => e <= 5).length, all.length), median: all.length ? all[all.length >> 1] : null,
+      fromHistory: pct(score.errors.typical.length, all.length),
+      lateCaught: pct(L.tp, L.tp + L.fn), falseLate: pct(L.fp, L.fp + L.tn), lateCases: L.tp + L.fn,
+    };
+  }
+
+  return { createWorld, summarize, rng, STEP };
+});
+
+</script>
+<script>
+// Route map: the loop drawn from the stops' real coordinates, with shuttle markers that glide between
+// updates. No map tiles or libraries, so it works offline and inside the simulator.
+(function (root) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs = {}, parent) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    if (parent) parent.appendChild(n);
+    return n;
+  };
+
+  function create(config, { maxHeight = 230 } = {}) {
+    const S = config.stops;
+    const lat0 = S.reduce((a, s) => a + s.lat, 0) / S.length, kx = Math.cos(lat0 * Math.PI / 180);
+    const xs = S.map(s => s.lng * kx), ys = S.map(s => -s.lat);
+    const minX = Math.min(...xs), minY = Math.min(...ys);
+    const spanX = Math.max(...xs) - minX || 1e-6, spanY = Math.max(...ys) - minY || 1e-6;
+    const W = 400, padX = 112, padY = 30;
+    const scale = Math.min((W - 2 * padX) / spanX, maxHeight / spanY);
+    const H = Math.round(spanY * scale + 2 * padY), offX = (W - spanX * scale) / 2;
+    const P = p => [offX + (p.lng * kx - minX) * scale, padY + (-p.lat - minY) * scale];
+    const pts = S.map(P);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'route-map';
+    const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `Route map of ${S.length} stops` }, wrap);
+    el('path', { class: 'route-line', d: 'M' + pts.map(p => p.map(v => v.toFixed(1)).join(' ')).join(' L') + ' Z' }, svg);
+    pts.forEach((p, i) => { // direction arrows at segment midpoints
+      const q = pts[(i + 1) % pts.length], ang = Math.atan2(q[1] - p[1], q[0] - p[0]) * 180 / Math.PI;
+      el('path', { class: 'route-arrow', d: 'M-3.5 -4 L2.5 0 L-3.5 4', transform: `translate(${((p[0] + q[0]) / 2).toFixed(1)} ${((p[1] + q[1]) / 2).toFixed(1)}) rotate(${ang.toFixed(0)})` }, svg);
+    });
+    const stopEls = S.map((s, i) => {
+      const [x, y] = pts[i], g = el('g', { class: 'map-stop', 'data-id': s.id }, svg);
+      el('circle', { class: 'stop-ring', cx: x, cy: y, r: 13 }, g);
+      el('circle', { class: 'stop-dot', cx: x, cy: y, r: 6 }, g);
+      const right = x < W / 2 + 1, t = el('text', { x: x + (right ? -20 : 20), y: y + 4, 'text-anchor': right ? 'end' : 'start' }, g);
+      t.textContent = s.name;
+      return g;
+    });
+    const ghostLayer = el('g', { class: 'ghosts' }, svg), busLayer = el('g', { class: 'buses' }, svg);
+    const markers = new Map();
+
+    function marker(layer, key, ghost, label) {
+      let g = markers.get(key);
+      if (!g) {
+        g = el('g', { class: ghost ? 'ghost' : 'bus' }, layer);
+        if (ghost) { el('circle', { r: 16 }, g); }
+        else { el('rect', { x: -15, y: -10, width: 30, height: 20, rx: 6 }, g); }
+        const t = el('text', { y: ghost ? -20 : 4.5, 'text-anchor': 'middle' }, g); t.textContent = label;
+        el('title', {}, g);
+        markers.set(key, g);
+      }
+      return g;
+    }
+    function place(g, p, offset) {
+      const [x, y] = P(p);
+      g.style.transform = `translate(${x.toFixed(1)}px, ${(y + offset).toFixed(1)}px)`;
+    }
+
+    // state: from the tracker. opts.highlight: stop id ("you are here"); opts.focus: shuttle id;
+    // opts.ghosts: [{id, lat, lng}] real positions (simulator only)
+    function update(state, opts = {}) {
+      stopEls.forEach(g => g.classList.toggle('here', g.dataset.id === opts.highlight));
+      const seen = new Set(), stacked = new Map();
+      state.buses.forEach(b => {
+        const g = marker(busLayer, 'bus:' + b.id, false, b.id);
+        seen.add('bus:' + b.id);
+        g.style.display = b.est ? '' : 'none';
+        if (!b.est) return;
+        const key = `${b.est.lat.toFixed(4)},${b.est.lng.toFixed(4)}`, n = stacked.get(key) || 0;
+        stacked.set(key, n + 1);
+        place(g, b.est, n * 22);
+        g.classList.toggle('late', !!b.late);
+        g.classList.toggle('dim', !!opts.focus && opts.focus !== b.id);
+        g.querySelector('title').textContent = `${b.name}: estimated position${b.late ? ', behind schedule' : ''}`;
+      });
+      (opts.ghosts || []).forEach(p => {
+        const g = marker(ghostLayer, 'ghost:' + p.id, true, p.id);
+        seen.add('ghost:' + p.id);
+        g.style.display = p.lat == null ? 'none' : '';
+        if (p.lat != null) place(g, p, 0);
+        g.querySelector('title').textContent = `Where ${p.id} really is`;
+      });
+      for (const [k, g] of markers) if (!seen.has(k)) g.style.display = 'none';
+    }
+    return { el: wrap, update };
+  }
+
+  root.ShuttleMap = { create };
+})(typeof self !== 'undefined' ? self : this);
+
+</script>
+<script>
+// The rider app. Three views, picked by which QR code was scanned:
+//   /s/<stop>    the stop's own code: next shuttle, "it's here", "I'm waiting"
+//   /b/<shuttle> the code inside a shuttle: tap the stop it's at, or share location hands-free
+//   /            all stops (linked from the other two)
+// mountApp() takes an `api`, so the simulator can run the same UI against an in-browser tracker.
+(function (root) {
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function mountApp(rootEl, { api, route, device, refreshMs = 15000, onNavigate }) {
+    let cfg, state, map, sharing = null, lastHtml = '', timeFmt;
+    rootEl.classList.add('shuttle-app');
+
+    const stopName = id => cfg.stops.find(s => s.id === id)?.name || id;
+    const busName = id => cfg.shuttles.find(b => b.id === id)?.name || id;
+    const ago = t => { const m = Math.round((state.now - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; };
+    const clock = t => timeFmt.format(t);
+
+    function toast(msg) {
+      rootEl.querySelector('.toast')?.remove();
+      const n = Object.assign(document.createElement('div'), { className: 'toast', role: 'status', textContent: msg });
+      rootEl.append(n); setTimeout(() => n.remove(), 2800);
+    }
+    async function report(body, okMsg) {
+      try {
+        const r = await api.report({ ...body, device, k: route.k });
+        toast(r.ok ? (r.msg === 'ok' ? okMsg : 'Already counted. Thanks!') : r.error || 'That didn’t go through. Try again.');
+        await refresh();
+      } catch { toast('You’re offline. Try again in a moment.'); }
+    }
+
+    // ---- pieces ----
+    function eta(e) {
+      if (!e) return '<div class="eta"><span class="eta-num">—</span><span class="eta-sub">no estimate</span></div>';
+      const live = e.source === 'live';
+      const cls = !live ? 'approx' : e.late ? 'late' : e.mins === 0 ? 'now' : '';
+      const num = live && e.mins === 0 ? 'Now' : `${live ? '' : '~'}${e.mins}<small> min</small>`;
+      const sub = e.source === 'typical' ? 'usual time' : e.source === 'schedule' ? 'timetable'
+        : e.late ? `Behind schedule${e.lateBy ? ` · +${e.lateBy}` : ''}`
+        : e.mins === 0 && e.departs ? `leaves ${clock(e.departs)}` : e.lateBy != null ? 'on time' : 'live';
+      return `<div class="eta ${cls}"><span class="eta-num">${num}</span><span class="eta-sub">${sub}</span></div>`;
+    }
+    function busStatus(b) {
+      if (!b.pos) return `<div class="bus-status"><b>${esc(b.name)}</b> <span class="muted">· no reports lately</span></div>`;
+      const where = b.est?.atStop ? `at ${esc(stopName(b.est.stop))}` : b.est?.to ? `heading to ${esc(stopName(b.est.to))}` : `last at ${esc(stopName(b.pos.stop))}`;
+      const flag = b.late ? `<span class="pill late">Behind schedule${b.lateBy ? ` · +${b.lateBy} min` : ''}</span>`
+        : b.lateBy != null ? '<span class="pill ok">On time</span>' : '';
+      const who = b.pos.via === 'gps' ? 'rider location' : `${b.pos.reporters} report${b.pos.reporters > 1 ? 's' : ''}`;
+      return `<div class="bus-status"><div><b>${esc(b.name)}</b> ${where} ${flag}</div>
+        <div class="muted small">Last report ${ago(b.pos.at)} · ${who}</div></div>`;
+    }
+    const navLink = (to, label, cls = '') => `<a class="${cls}" href="${to === 'board' ? '/' : '/s/' + to}" data-nav="${to}">${label}</a>`;
+    const legend = '<p class="map-legend small muted">Shuttle positions are estimated from rider reports.</p>';
+
+    // ---- views ----
+    function board() {
+      return `
+        <section class="stack">${state.buses.map(busStatus).join('')}</section>
+        <div class="map-slot"></div>${legend}
+        <h2>Stops</h2>
+        <ul class="stop-list">${cfg.stops.map((s, i) => {
+          const st = state.stops[i];
+          return `<li>${navLink(s.id, `<span><span class="stop-name">${esc(s.name)}</span>
+            <span class="muted small">${st.waiting ? `${st.waiting} waiting · ` : ''}${st.lastArrival ? `shuttle ${ago(st.lastArrival)}` : 'no sightings yet'}</span></span>${eta(st.etas[0])}`, 'stop-row')}</li>`;
+        }).join('')}</ul>
+        <h2>Recent reports</h2>
+        <ul class="feed small">${state.recent.length ? state.recent.map(r => `<li><span class="muted">${clock(r.t)}</span>
+          ${r.type === 'arrive' ? `${esc(busName(r.bus))} at` : 'Someone waiting at'} ${esc(stopName(r.stop))}</li>`).join('') : '<li class="muted">Nothing yet today.</li>'}</ul>`;
+    }
+
+    function stopView() {
+      const i = cfg.stops.findIndex(s => s.id === route.id);
+      if (i < 0) return `<p>This QR code doesn’t match a stop. ${navLink('board', 'See all stops')}</p>`;
+      const s = cfg.stops[i], st = state.stops[i], [e, then] = st.etas;
+      const forBus = e?.bus ? busName(e.bus) : 'Next shuttle';
+      const note = e?.source === 'typical' ? `No live reports yet. Based on the last ${e.days} days.`
+        : e?.source === 'schedule' ? 'No live reports yet. From the timetable.'
+        : e?.late ? `Running ${e.lateBy ? `${e.lateBy} min ` : ''}behind schedule.` : '';
+      return `
+        <p class="eyebrow">You’re at</p>
+        <h1>${esc(s.name)}</h1>
+        <section class="eta-card ${e?.late ? 'is-late' : ''}">
+          <div><div class="small muted">${esc(e?.source === 'typical' ? 'Next shuttle' : forBus)}</div>
+            ${note ? `<div class="note">${esc(note)}</div>` : ''}
+            ${then ? `<div class="small muted">Then ${esc(then.bus ? busName(then.bus) : 'another')} in ${then.mins} min</div>` : ''}</div>
+          ${eta(e)}
+        </section>
+        <div class="actions">
+          ${cfg.shuttles.map(b => `<button class="btn primary" data-act="arrive" data-bus="${b.id}">${cfg.shuttles.length > 1 ? `${esc(b.name)} is here` : 'The shuttle is here'}</button>`).join('')}
+          <button class="btn" data-act="wait">I’m waiting${st.waiting ? ` <span class="count">${st.waiting} here</span>` : ''}</button>
+        </div>
+        <div class="map-slot"></div>${legend}
+        <p class="small">${navLink('board', 'All stops and shuttles')}</p>`;
+    }
+
+    function busView() {
+      const b = state.buses.find(x => x.id === route.id);
+      if (!b) return `<p>This QR code doesn’t match a shuttle. ${navLink('board', 'See all stops')}</p>`;
+      const next = b.next;
+      const others = cfg.stops.filter(s => s.id !== next);
+      const stopBtn = (s, cls) => `<button class="btn ${cls}" data-act="here" data-stop="${s.id}">${cls ? 'We’re at ' : ''}${esc(s.name)}</button>`;
+      return `
+        <p class="eyebrow">You’re riding</p>
+        <h1>${esc(b.name)}</h1>
+        ${busStatus(b)}
+        <h2>When the shuttle pulls in</h2>
+        ${next ? `<div class="actions">${stopBtn(cfg.stops.find(s => s.id === next), 'primary')}</div>
+          <details class="other-stops"><summary>At a different stop?</summary><div class="actions">${others.map(s => stopBtn(s, '')).join('')}</div></details>`
+          : `<div class="actions">${cfg.stops.map(s => stopBtn(s, '')).join('')}</div>`}
+        <div class="map-slot"></div>${legend}
+        <h2>Hands-free</h2>
+        <button class="btn" data-act="share">${sharing ? 'Stop sharing my location' : 'Share my location while I ride'}</button>
+        <p class="small muted">Sends your position every 30 seconds for up to 30 minutes while this page is open. Others only see the shuttle’s position.</p>`;
+    }
+
+    function render() {
+      if (!cfg || !state) return;
+      const html = route.kind === 's' ? stopView() : route.kind === 'b' ? busView() : board();
+      if (html !== lastHtml) {
+        const open = rootEl.querySelector('details')?.open;
+        rootEl.querySelector('.views')?.remove();
+        const v = document.createElement('div'); v.className = 'views'; v.innerHTML = html;
+        rootEl.prepend(v); lastHtml = html;
+        if (open && v.querySelector('details')) v.querySelector('details').open = true;
+        v.querySelector('.map-slot')?.append(map.el);
+      }
+      map.update(state, { highlight: route.kind === 's' ? route.id : null, focus: route.kind === 'b' ? route.id : null });
+    }
+    async function refresh() { try { state = await api.state(); render(); } catch {} }
+
+    function stopSharing() { if (sharing != null) api.geo.clear(sharing); sharing = null; }
+    rootEl.addEventListener('click', ev => {
+      const nav = ev.target.closest('[data-nav]');
+      if (nav && onNavigate) { ev.preventDefault(); onNavigate(nav.dataset.nav); return; }
+      const btn = ev.target.closest('[data-act]');
+      if (!btn) return;
+      const act = btn.dataset.act;
+      if (act === 'arrive') report({ type: 'arrive', stop: route.id, bus: btn.dataset.bus }, 'Thanks! Everyone can see it now.');
+      if (act === 'wait') report({ type: 'wait', stop: route.id }, 'Got it. You’re counted as waiting.');
+      if (act === 'here') report({ type: 'arrive', stop: btn.dataset.stop, bus: route.id }, `Thanks! Marked at ${stopName(btn.dataset.stop)}.`);
+      if (act === 'share') {
+        if (sharing != null) { stopSharing(); lastHtml = ''; render(); return; }
+        const started = state.now; let last = 0;
+        sharing = api.geo.watch(p => {
+          if (state.now - started > 30 * 60000) { stopSharing(); lastHtml = ''; render(); return; }
+          if (state.now - last < 30000) return;
+          last = state.now;
+          api.report({ type: 'gps', bus: route.id, device, k: route.k, lat: p.lat, lng: p.lng }).catch(() => {});
+        }, () => { toast('Location is off for this site. Turn it on in your browser settings.'); stopSharing(); lastHtml = ''; render(); });
+        toast('Sharing location. Keep this page open.');
+        lastHtml = ''; render();
+      }
+    });
+
+    (async () => {
+      cfg = await api.config();
+      timeFmt = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZone: cfg.timezone || undefined });
+      map = root.ShuttleMap.create(cfg);
+      await refresh();
+      if (refreshMs) setInterval(refresh, refreshMs);
+    })();
+    return { refresh, setRoute(r) { route = r; stopSharing(); lastHtml = ''; render(); } };
+  }
+
+  // ---- the real site ----
+  const httpApi = {
+    config: () => fetch('/api/config').then(r => r.json()),
+    state: () => fetch('/api/state').then(r => r.json()),
+    report: body => fetch('/api/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(async r => ({ ok: r.ok, ...(await r.json()) })),
+    geo: {
+      watch: (cb, err) => navigator.geolocation ? navigator.geolocation.watchPosition(p => cb({ lat: p.coords.latitude, lng: p.coords.longitude }), err, { enableHighAccuracy: true }) : (err(), null),
+      clear: id => navigator.geolocation?.clearWatch(id),
+    },
+  };
+  function boot() {
+    const host = document.getElementById('app');
+    if (!host || root.SHUTTLE_NO_AUTOBOOT) return;
+    const [, kind, id] = location.pathname.split('/');
+    const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+    let k = new URLSearchParams(location.search).get('k');
+    if (k) store.set('k:' + location.pathname, k); else k = store.get('k:' + location.pathname);
+    let device = store.get('dev');
+    if (!device) { device = (crypto.randomUUID?.() || Math.random().toString(36).slice(2)); store.set('dev', device); }
+    httpApi.config().then(c => { document.title = c.title; const h = document.getElementById('title'); if (h) h.textContent = c.title; });
+    mountApp(host, { api: httpApi, route: { kind, id: id && decodeURIComponent(id), k }, device });
+  }
+  root.ShuttleApp = { mountApp };
+  if (typeof document !== 'undefined') document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', boot) : boot();
+})(window);
+
+</script>
+<script>
+// Interactive simulator: runs core.js + world.js in the browser and mounts the real app (app.js) in two
+// phone frames, so you can tap through it while simulated shuttles and students go about their morning.
+(function () {
+  const { createTracker, MIN } = window.ShuttleCore;
+  const { createWorld, summarize } = window.ShuttleWorld;
+  const config = window.SHUTTLE_CONFIG;
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const timeFmt = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZone: config.timezone || undefined });
+
+  const sim = { tracker: null, world: null, clock: { t: 0 }, target: 0, speed: 30, playing: true, ghosts: true };
+  const advance = t => { sim.target = Math.max(sim.target, t); sim.world.runUntil(sim.target); };
+
+  // first timetable departure of the day (in the school's timezone), minus 10 minutes
+  function dayStart(tracker, dayOffset) {
+    const ref = Date.now() + dayOffset * 24 * 60 * MIN;
+    const firsts = config.shuttles.map(b => tracker.schedTimes(b.id, 0, ref)[0]).filter(x => x != null);
+    return (firsts.length ? Math.min(...firsts) : ref) - 10 * MIN;
+  }
+
+  function start(withHistory) {
+    const clock = sim.clock;
+    const tracker = createTracker(config, { now: () => clock.t });
+    if (withHistory) for (let d = -10; d < 0; d++) { // 10 earlier mornings, so "usual time" has data
+      tracker.reset();
+      const s = dayStart(tracker, d), w = createWorld({ tracker, clock, start: s, seed: 1000 + d });
+      w.runUntil(s + 5 * 60 * MIN, false);
+    }
+    tracker.reset();
+    const s = dayStart(tracker, 0);
+    const world = createWorld({ tracker, clock, start: s, seed: Math.floor(Math.random() * 1e6), opts: readOpts() });
+    sim.tracker = tracker; sim.world = world;
+    $('log').innerHTML = '';
+    world.onLog(addLog);
+    addLog({ t: clock.t, text: withHistory ? 'Morning starts. The app has 10 days of past data.' : 'Morning starts. The app has no past data.', kind: 'info' });
+    sim.target = 0; advance(s + 14 * MIN); // open on a morning already in motion
+    phones.forEach(p => p.app.setRoute(p.route()));
+    draw(true);
+  }
+
+  // ---- controls ----
+  function readOpts() {
+    const tap = +$('tap').value / 100, gps = +$('gps').value / 100;
+    return { hereTap: tap, waitTap: Math.min(1, tap * 1.3), rideTap: tap / 3, gpsShare: gps };
+  }
+  function syncOpts() {
+    $('tapOut').textContent = $('tap').value + '%';
+    $('gpsOut').textContent = $('gps').value + '%';
+    if (sim.world) Object.assign(sim.world.opts, readOpts());
+  }
+  $('tap').addEventListener('input', syncOpts);
+  $('gps').addEventListener('input', syncOpts);
+  $('play').addEventListener('click', () => { sim.playing = !sim.playing; $('play').textContent = sim.playing ? 'Pause' : 'Play'; $('play').setAttribute('aria-pressed', String(!sim.playing)); });
+  document.querySelectorAll('[data-speed]').forEach(b => b.addEventListener('click', () => {
+    sim.speed = +b.dataset.speed;
+    document.querySelectorAll('[data-speed]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  }));
+  $('skip').addEventListener('click', () => { advance(sim.target + 15 * MIN); draw(true); });
+  $('prank').addEventListener('click', () => { sim.world.prank(false); draw(true); });
+  $('ghosts').addEventListener('change', e => { sim.ghosts = e.target.checked; draw(true); });
+  $('restart').addEventListener('click', () => start($('history').checked));
+  const jams = $('jams');
+  jams.innerHTML = config.shuttles.map(b => `<button class="cbtn" data-jam="${b.id}">Traffic jam: ${esc(b.name)} +10 min</button>`).join('');
+  jams.addEventListener('click', e => { const b = e.target.closest('[data-jam]'); if (b) { sim.world.jam(b.dataset.jam, 10); draw(true); } });
+
+  // ---- log ----
+  function addLog(x) {
+    const li = document.createElement('li');
+    li.className = 'k-' + x.kind;
+    li.innerHTML = `<time>${timeFmt.format(x.t)}</time><span>${esc(x.text)}</span>`;
+    const log = $('log'); log.prepend(li);
+    while (log.children.length > 60) log.lastChild.remove();
+  }
+
+  // ---- phones running the real app ----
+  const phoneApi = who => ({
+    config: async () => config,
+    state: async () => sim.tracker.buildState(),
+    report: async body => {
+      const [code, msg] = sim.tracker.handleReport(body, 'phone-' + who);
+      const what = body.type === 'wait' ? `waiting at ${name(body.stop)}` : `${busName(body.bus)} at ${name(body.stop)}`;
+      if (body.type !== 'gps') addLog({ t: sim.clock.t, text: `You reported ${what}${code === 200 ? '' : ` (rejected: ${msg})`}`, kind: 'you' });
+      return code === 200 ? { ok: true, msg } : { ok: false, error: msg };
+    },
+    geo: { // the phone inside a shuttle moves with that shuttle
+      watch: cb => setInterval(() => { const b = sim.world.buses.find(x => x.id === $('busPick').value); const p = b && sim.world.positionOf(b); if (p) cb(p); }, 300),
+      clear: id => clearInterval(id),
+    },
+  });
+  const name = id => config.stops.find(s => s.id === id)?.name || id;
+  const busName = id => config.shuttles.find(b => b.id === id)?.name || id;
+  $('stopPick').innerHTML = config.stops.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  $('busPick').innerHTML = config.shuttles.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+  $('stopPick').value = config.stops[1]?.id || config.stops[0].id;
+  const phones = [
+    { el: $('phoneStop'), who: 'stop', route: () => ({ kind: 's', id: $('stopPick').value }) },
+    { el: $('phoneBus'), who: 'bus', route: () => ({ kind: 'b', id: $('busPick').value }) },
+  ];
+  phones.forEach(p => {
+    p.app = window.ShuttleApp.mountApp(p.el, {
+      api: phoneApi(p.who), route: p.route(), device: 'you-' + p.who, refreshMs: 0,
+      onNavigate: to => p.app.setRoute(to === 'board' ? { kind: '' } : { kind: 's', id: to }),
+    });
+  });
+  $('stopPick').addEventListener('change', () => phones[0].app.setRoute(phones[0].route()));
+  $('busPick').addEventListener('change', () => phones[1].app.setRoute(phones[1].route()));
+
+  // ---- big map + scoreboard ----
+  const bigMap = window.ShuttleMap.create(config, { maxHeight: 300 });
+  $('bigmap').append(bigMap.el);
+  let lastDraw = 0;
+  function draw(force) {
+    const now = performance.now();
+    if (!force && now - lastDraw < 250) return;
+    lastDraw = now;
+    const st = sim.tracker.buildState();
+    $('clock').textContent = timeFmt.format(sim.target);
+    bigMap.update(st, { ghosts: sim.ghosts ? sim.world.buses.map(b => ({ id: b.id, ...(sim.world.positionOf(b, sim.target) || { lat: null }) })) : [] });
+    phones.forEach(p => p.app.refresh());
+    $('fleet').innerHTML = st.buses.map(b => {
+      const real = sim.world.buses.find(x => x.id === b.id);
+      const realWhere = real.mode === 'stop' ? `at ${name(config.stops[real.k].id)}` : real.mode === 'drive' ? `driving to ${name(config.stops[real.k].id)}` : real.mode === 'done' ? 'done for the day' : 'not started';
+      const said = !b.pos ? 'no reports yet' : b.late ? `<b class="late">behind schedule${b.lateBy ? ` +${b.lateBy} min` : ''}</b>` : b.lateBy != null ? 'on time' : 'tracking';
+      return `<li><b>${esc(b.name)}</b><span>Really ${realWhere}</span><span>App says: ${said}</span></li>`;
+    }).join('');
+    const s = summarize(sim.world.score);
+    const v = (x, unit = '%') => (x == null ? '—' : `${typeof x === 'number' && unit === ' min' ? x.toFixed(1) : x}${unit}`);
+    $('s-median').textContent = v(s.median, ' min');
+    $('s-within').textContent = v(s.within2);
+    $('s-caught').textContent = s.lateCases ? v(s.lateCaught) : '—';
+    $('s-false').textContent = s.lateCases || s.falseLate ? v(s.falseLate) : '—';
+  }
+
+  // ---- loop ----
+  let prev = performance.now();
+  function frame(now) {
+    const dt = Math.min(250, now - prev); prev = now;
+    if (sim.playing) { advance(sim.target + dt * sim.speed); draw(false); }
+    requestAnimationFrame(frame);
+  }
+  syncOpts();
+  start(true);
+  requestAnimationFrame(frame);
+})();
+
+</script>

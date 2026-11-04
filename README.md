@@ -1,49 +1,65 @@
-# Shuttle Tracker (QR-based, no tracking hardware)
+# Shuttle Tracker (QR codes, no tracking hardware)
 
-Crowd-sourced live shuttle tracker. Riders scan QR codes; nothing is installed on the shuttle.
+A live shuttle tracker that runs on rider reports. Every stop and every shuttle gets its own QR code; scanning it opens the page for *that* place. Nothing is installed on the shuttles.
 
-- **Stop QR** (`/s/<stop>`): see the ETA, tap **"The shuttle is here"** or **"I'm waiting"**.
-- **Shuttle QR** (`/b/<shuttle>`): riders tap the stop they're at, or opt in to share their phone's location while riding (auto-stops after 30 min).
-- **Home** (`/`): all stops with ETAs, people waiting, nearest stop, recent reports.
-- **Print signs** (`/qr`): printable QR signs for every stop and shuttle.
+![Simulator: route map with estimated and real shuttle positions, and two phones running the app](docs/simulator.png)
 
-![Before any reports (usual times from history), live, and a stop page](docs/screens.png)
+## What riders see
 
-## How ETAs work
-- **Live:** last sighting (a tap, or a rider's GPS — including partway between stops) + drive times to each stop. Drive times are learned from today's sightings and past days' (by hour), starting from `config.json`.
-- **Usual time (history):** with no live reports, the ETA is the median of when the shuttle came after this time of day on past days (weekdays/weekends separately). Confirmed arrivals are kept 60 days; stops nobody reported between two sightings are filled in.
-- **Running late:** shows "1 min" (due) instead of jumping to the next loop, until it's clearly missed.
-- Live position expires after `staleAfterMinutes`.
+| QR code | Page | What it does |
+|---|---|---|
+| At a stop | `/s/<stop>` | Next shuttle and ETA, **red "Behind schedule +N min"** when it's late, route map with "you are here", buttons: *Shuttle A is here*, *I'm waiting* |
+| Inside a shuttle | `/b/<shuttle>` | One big button for the stop it's pulling into next (*We're at Library*), other stops tucked away, optional hands-free location sharing |
+| — | `/` | All stops and shuttles with the map (linked from the pages above) |
+
+Nobody has to find their stop: the code they scanned already says where they are.
+
+## How it works
+- **Live position:** the last sighting (a tap, or a rider's GPS, including partway between stops), walked forward along the route with drive times learned from today and past days.
+- **Map:** shows each shuttle where the app estimates it is right now. Red marker = behind schedule.
+- **Timetable (optional):** shuttles wait at the first stop for their departure time; any stop's ETA is compared with the timetable and **4+ min late shows in red**.
+- **No live reports yet?** ETA from past days at this time ("usual time", 60 days kept), else from the timetable.
+- **Hasn't come yet:** if 2+ people said "I'm waiting" at a stop before the shuttle was due and nobody has reported it arriving, the app assumes it hasn't arrived: ETA becomes "1 min" and red, and the map holds it short of the stop.
 
 ## Anti-abuse
-- Per-device and per-IP rate limits, one report per device per stop every few minutes.
-- Taps with location must be within 800 m of the stop; GPS must be near the route.
-- A lone report the shuttle couldn't physically have made (e.g. 25 min away, 1 min later) is held until a 2nd person confirms it, and that phone is ignored for an hour.
+- **QR keys (optional):** set `QR_SECRET` and each printed code carries a key for its own stop or shuttle. A stop's code can only report for that stop; a shuttle's code only for that shuttle. Typing a URL from home doesn't work.
+- Rate limits per phone and network; one report per phone per stop every few minutes.
+- Taps with location must be within 800 m of the stop; GPS must be on the route.
+- A lone report the shuttle couldn't have made in time is held until a 2nd person confirms it, and that phone is ignored for an hour.
+- With no recent sighting, a lone report far off the timetable is held until another report agrees with it.
 
-## Tests & simulation
+## Try it
 ```bash
-npm test          # unit tests
-npm run sim       # simulate mornings (with traffic, riders, pranksters) and score ETA accuracy
-npm run sim:live  # watch a simulated morning at 30x speed on http://localhost:3000
+npm run build:sim   # writes dist/shuttle-sim.html: open it in any browser, no server
+npm start           # the app on http://localhost:3000, simulator at /sim
+npm test            # unit tests
+npm run sim         # score ETA accuracy over many simulated mornings
 ```
+The simulator runs the real tracking code and the real app in two phones while simulated shuttles drive with random traffic. You can add traffic jams, send fake reports, change how many riders tap, and tap the phones yourself. Dashed circles show where the shuttles really are, which the app never sees.
 
-Sample `npm run sim` results (6 random mornings × 3 h, every stop checked every 30 s):
+Sample `npm run sim` (6 random mornings × 3 h, 2 shuttles, random traffic jams, every stop checked every 30 s):
 
-| scenario | has ETA | within ±2 min | within ±5 min | median error |
+| scenario | median ETA error | within ±5 min | late shuttles flagged | false "behind schedule" |
 |---|---|---|---|---|
-| Nobody reports, no history | 0% | — | — | — |
-| Nobody reports today, 10 days history | 98% | 32% | 75% | 3.5 min |
-| Low participation (10% tap) + history | 100% | 63% | 93% | 1.6 min |
-| Typical (30% tap) + history | 100% | 67% | 96% | 1.4 min |
-| Typical + 10% riders share GPS | 100% | 70% | 98% | 1.2 min |
-| Typical + prankster (location off) | 100% | 62% | 90% | 1.5 min |
+| Nobody reports (timetable only) | 3.8 min | 65% | — | — |
+| Nobody reports, 10 days of history | 3.6 min | 68% | — | — |
+| 10% of riders tap, plus history | 1.7 min | 76% | 75% | 22% |
+| 30% tap, plus history | 1.5 min | 83% | 78% | 17% |
+| 30% tap + prankster with location off | 1.5 min | 83% | 79% | 12% |
 
 ## Setup
-1. Edit `config.json`: set `timezone`, then your stops **in route order** with real lat/lng (right-click in Google Maps to copy), and `minsFromPrev` = minutes driving from the previous stop (first stop = minutes from the last stop back to it). Add shuttles if there's more than one.
-2. Run locally: `node server.js` (Node 20+, no dependencies) → http://localhost:3000
-3. Deploy anywhere that runs Node (Render, Railway, Fly.io, a school server). Set `PORT` if needed. Data is stored in `data/` (`DATA_DIR` to change): raw reports for 24 h, confirmed arrivals for 60 days (`historyDays`). Use a host with a persistent disk so history survives restarts.
-4. Open `https://<your-site>/qr` and print. Post stop signs at stops, shuttle signs inside shuttles.
+1. Edit `config.json`:
+   - `timezone`, then stops **in route order**: name, lat/lng (right-click in Google Maps to copy), and `minsFromPrev` (driving minutes from the previous stop; the first stop's is from the last stop back to it).
+   - `shuttles`, each with an optional `schedule`: `{ "start": "07:30", "end": "18:30", "everyMinutes": 40 }` or `{ "departures": ["07:30", "08:15", ...] }` (times it leaves the first stop). Or put one `schedule` at the top level for all shuttles.
+   - `lateMinutes` (default 4): how late counts as "behind schedule".
+2. Deploy anywhere that runs Node 20+ (Render, Railway, Fly.io, a school server). No dependencies. Use a persistent disk: data lives in `data/` (`DATA_DIR`).
+3. Optional: set `QR_SECRET` (any long random string) and `ADMIN_KEY`.
+4. Open `https://<your-site>/qr` (or `/qr?key=<ADMIN_KEY>` with `QR_SECRET` set) and print. Post each stop's sign at that stop and each shuttle's sign inside that shuttle.
 
-Optional: set `ADMIN_KEY` and `POST /api/reset?key=...` to clear all reports.
+## Code
+- `core.js`: all the tracking logic (positions, ETAs, lateness, history, anti-abuse). No I/O; runs in Node and the browser.
+- `server.js`: HTTP, saving to disk, QR keys.
+- `public/`: the app (`app.js`), route map (`map.js`), simulator page (`sim.html`, `sim.js`), printable QR page.
+- `sim/world.js`: the simulated campus. `sim/simulate.js`: the scoring run.
 
 `public/qrcode.js` is [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) (MIT).

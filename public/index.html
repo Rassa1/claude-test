@@ -2,14 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Shuttle Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Semi+Condensed:wght@500;600&display=swap">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header><a href="/" id="title">Shuttle Tracker</a></header>
-<main id="app"><p class="muted">Loading…</p></main>
-<footer class="muted">Live from rider reports — no tracking hardware. Times are estimates.</footer>
+<header class="site-header"><a href="/" id="title">Shuttle Tracker</a></header>
+<main class="site-main" id="app"></main>
+<footer class="site-footer">Built from rider reports. No tracking hardware. Times are estimates.</footer>
+<script src="/map.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

@@ -1,158 +1,189 @@
-// Single-page app: "/" = live board, "/s/<stop>" = stop QR page, "/b/<shuttle>" = on-board QR page.
-const $app = document.getElementById('app');
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-let device;
-try { device = localStorage.getItem('dev') || (localStorage.setItem('dev', crypto.randomUUID()), localStorage.getItem('dev')); }
-catch { device = Math.random().toString(36).slice(2); }
+// The rider app. Three views, picked by which QR code was scanned:
+//   /s/<stop>    the stop's own code: next shuttle, "it's here", "I'm waiting"
+//   /b/<shuttle> the code inside a shuttle: tap the stop it's at, or share location hands-free
+//   /            all stops (linked from the other two)
+// mountApp() takes an `api`, so the simulator can run the same UI against an in-browser tracker.
+(function (root) {
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-let cfg, state, myPos = null, sharing = null;
-const [, kind, param] = location.pathname.split('/');
+  function mountApp(rootEl, { api, route, device, refreshMs = 15000, onNavigate }) {
+    let cfg, state, map, sharing = null, lastHtml = '', timeFmt;
+    rootEl.classList.add('shuttle-app');
 
-function ago(t) {
-  const m = Math.round(((state?.now ?? Date.now()) - t) / 60000); // server clock, avoids phone clock skew
-  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
-}
-function etaHtml(e) {
-  if (!e) return '<div class="eta">—</div>';
-  if (e.source === 'typical') return `<div class="eta typical">~${e.mins} min<div class="eta-src">usual time</div></div>`;
-  return `<div class="eta ${e.mins === 0 ? 'now' : ''}">${e.mins === 0 ? 'Now' : `${e.mins} min`}</div>`;
-}
-function dist(a, b) {
-  const R = 6371000, r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r;
-  return 2 * R * Math.asin(Math.sqrt(Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2));
-}
-function nearest() {
-  if (!myPos) return null;
-  return cfg.stops.map(s => ({ s, d: dist(myPos, s) })).sort((a, b) => a.d - b.d)[0];
-}
-function toast(msg) {
-  document.querySelector('.toast')?.remove();
-  const el = Object.assign(document.createElement('div'), { className: 'toast', textContent: msg });
-  document.body.append(el); setTimeout(() => el.remove(), 3000);
-}
-function locate() {
-  return new Promise(res => {
-    if (!navigator.geolocation) return res(null);
-    navigator.geolocation.getCurrentPosition(
-      p => { myPos = { lat: p.coords.latitude, lng: p.coords.longitude }; res(myPos); },
-      () => res(null), { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
-  });
-}
-async function report(body, okMsg) {
-  try {
-    const r = await fetch('/api/report', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, device, ...(myPos || {}) }) });
-    const j = await r.json();
-    toast(r.ok ? (j.msg === 'ok' ? okMsg : 'Already counted — thanks!') : (j.error || 'Something went wrong'));
-    await refresh();
-  } catch { toast('Offline — try again'); }
-}
+    const stopName = id => cfg.stops.find(s => s.id === id)?.name || id;
+    const busName = id => cfg.shuttles.find(b => b.id === id)?.name || id;
+    const ago = t => { const m = Math.round((state.now - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; };
+    const clock = t => timeFmt.format(t);
 
-async function refresh() {
-  try { state = await (await fetch('/api/state')).json(); render(); } catch {}
-}
+    function toast(msg) {
+      rootEl.querySelector('.toast')?.remove();
+      const n = Object.assign(document.createElement('div'), { className: 'toast', role: 'status', textContent: msg });
+      rootEl.append(n); setTimeout(() => n.remove(), 2800);
+    }
+    async function report(body, okMsg) {
+      try {
+        const r = await api.report({ ...body, device, k: route.k });
+        toast(r.ok ? (r.msg === 'ok' ? okMsg : 'Already counted. Thanks!') : r.error || 'That didn’t go through. Try again.');
+        await refresh();
+      } catch { toast('You’re offline. Try again in a moment.'); }
+    }
 
-function busLine(b) {
-  if (!b.pos) return `<div class="muted small">${esc(b.name)}: no recent reports</div>`;
-  const stop = cfg.stops.find(s => s.id === b.pos.stop);
-  const how = b.pos.via === 'gps' ? 'near' : 'at';
-  const who = b.pos.via === 'gps' ? 'rider location' : `${b.pos.reporters} report${b.pos.reporters > 1 ? 's' : ''}`;
-  return `<div class="small"><b>${esc(b.name)}</b> was ${how} <b>${esc(stop.name)}</b> ${ago(b.pos.at)} <span class="muted">(${who})</span></div>`;
-}
-function stopCard(s, st, near) {
-  const e = st.etas[0];
-  return `<a class="card row" href="/s/${s.id}" style="color:inherit;text-decoration:none">
-    <div><div class="stop-name">${esc(s.name)} ${near ? '<span class="pill near">nearest</span>' : ''}</div>
-      <div class="muted small">${st.waiting ? `${st.waiting} waiting · ` : ''}${st.lastArrival ? `last seen ${ago(st.lastArrival)}` : 'no sightings yet'}</div></div>
-    ${etaHtml(e)}</a>`;
-}
+    // ---- pieces ----
+    function eta(e) {
+      if (!e) return '<div class="eta"><span class="eta-num">—</span><span class="eta-sub">no estimate</span></div>';
+      const live = e.source === 'live';
+      const cls = !live ? 'approx' : e.late ? 'late' : e.mins === 0 ? 'now' : '';
+      const num = live && e.mins === 0 ? 'Now' : `${live ? '' : '~'}${e.mins}<small> min</small>`;
+      const sub = e.source === 'typical' ? 'usual time' : e.source === 'schedule' ? 'timetable'
+        : e.late ? `Behind schedule${e.lateBy ? ` · +${e.lateBy}` : ''}`
+        : e.mins === 0 && e.departs ? `leaves ${clock(e.departs)}` : e.lateBy != null ? 'on time' : 'live';
+      return `<div class="eta ${cls}"><span class="eta-num">${num}</span><span class="eta-sub">${sub}</span></div>`;
+    }
+    function busStatus(b) {
+      if (!b.pos) return `<div class="bus-status"><b>${esc(b.name)}</b> <span class="muted">· no reports lately</span></div>`;
+      const where = b.est?.atStop ? `at ${esc(stopName(b.est.stop))}` : b.est?.to ? `heading to ${esc(stopName(b.est.to))}` : `last at ${esc(stopName(b.pos.stop))}`;
+      const flag = b.late ? `<span class="pill late">Behind schedule${b.lateBy ? ` · +${b.lateBy} min` : ''}</span>`
+        : b.lateBy != null ? '<span class="pill ok">On time</span>' : '';
+      const who = b.pos.via === 'gps' ? 'rider location' : `${b.pos.reporters} report${b.pos.reporters > 1 ? 's' : ''}`;
+      return `<div class="bus-status"><div><b>${esc(b.name)}</b> ${where} ${flag}</div>
+        <div class="muted small">Last report ${ago(b.pos.at)} · ${who}</div></div>`;
+    }
+    const navLink = (to, label, cls = '') => `<a class="${cls}" href="${to === 'board' ? '/' : '/s/' + to}" data-nav="${to}">${label}</a>`;
+    const legend = '<p class="map-legend small muted">Shuttle positions are estimated from rider reports.</p>';
 
-function renderBoard() {
-  const n = nearest();
-  const anyLive = state.buses.some(b => b.pos);
-  $app.innerHTML = `
-    <div class="card">${state.buses.map(busLine).join('')}
-      ${anyLive ? '' : '<div class="muted small" style="margin-top:6px">Be the first: scan the QR code at your stop or on the shuttle.</div>'}</div>
-    ${myPos ? '' : '<button id="loc">📍 Find my nearest stop</button>'}
-    <h2>Stops</h2>
-    ${cfg.stops.map((s, i) => stopCard(s, state.stops[i], n && n.s.id === s.id)).join('')}
-    <h2>Recent reports</h2>
-    <div class="card small">${state.recent.length ? state.recent.map(r =>
-      `<div>${ago(r.t)} · ${r.type === 'arrive' ? '🚌 shuttle at' : '🙋 someone waiting at'} ${esc(cfg.stops.find(s => s.id === r.stop)?.name || r.stop)}</div>`).join('')
-      : '<span class="muted">Nothing yet today.</span>'}</div>`;
-  document.getElementById('loc')?.addEventListener('click', async () => { if (!await locate()) toast('Location unavailable'); render(); });
-}
+    // ---- views ----
+    function board() {
+      return `
+        <section class="stack">${state.buses.map(busStatus).join('')}</section>
+        <div class="map-slot"></div>${legend}
+        <h2>Stops</h2>
+        <ul class="stop-list">${cfg.stops.map((s, i) => {
+          const st = state.stops[i];
+          return `<li>${navLink(s.id, `<span><span class="stop-name">${esc(s.name)}</span>
+            <span class="muted small">${st.waiting ? `${st.waiting} waiting · ` : ''}${st.lastArrival ? `shuttle ${ago(st.lastArrival)}` : 'no sightings yet'}</span></span>${eta(st.etas[0])}`, 'stop-row')}</li>`;
+        }).join('')}</ul>
+        <h2>Recent reports</h2>
+        <ul class="feed small">${state.recent.length ? state.recent.map(r => `<li><span class="muted">${clock(r.t)}</span>
+          ${r.type === 'arrive' ? `${esc(busName(r.bus))} at` : 'Someone waiting at'} ${esc(stopName(r.stop))}</li>`).join('') : '<li class="muted">Nothing yet today.</li>'}</ul>`;
+    }
 
-function busPicker(id) {
-  if (cfg.shuttles.length < 2) return '';
-  return `<label class="small muted">Which shuttle?</label>
-    <select id="${id}">${cfg.shuttles.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select>`;
-}
+    function stopView() {
+      const i = cfg.stops.findIndex(s => s.id === route.id);
+      if (i < 0) return `<p>This QR code doesn’t match a stop. ${navLink('board', 'See all stops')}</p>`;
+      const s = cfg.stops[i], st = state.stops[i], [e, then] = st.etas;
+      const forBus = e?.bus ? busName(e.bus) : 'Next shuttle';
+      const note = e?.source === 'typical' ? `No live reports yet. Based on the last ${e.days} days.`
+        : e?.source === 'schedule' ? 'No live reports yet. From the timetable.'
+        : e?.late ? `Running ${e.lateBy ? `${e.lateBy} min ` : ''}behind schedule.` : '';
+      return `
+        <p class="eyebrow">You’re at</p>
+        <h1>${esc(s.name)}</h1>
+        <section class="eta-card ${e?.late ? 'is-late' : ''}">
+          <div><div class="small muted">${esc(e?.source === 'typical' ? 'Next shuttle' : forBus)}</div>
+            ${note ? `<div class="note">${esc(note)}</div>` : ''}
+            ${then ? `<div class="small muted">Then ${esc(then.bus ? busName(then.bus) : 'another')} in ${then.mins} min</div>` : ''}</div>
+          ${eta(e)}
+        </section>
+        <div class="actions">
+          ${cfg.shuttles.map(b => `<button class="btn primary" data-act="arrive" data-bus="${b.id}">${cfg.shuttles.length > 1 ? `${esc(b.name)} is here` : 'The shuttle is here'}</button>`).join('')}
+          <button class="btn" data-act="wait">I’m waiting${st.waiting ? ` <span class="count">${st.waiting} here</span>` : ''}</button>
+        </div>
+        <div class="map-slot"></div>${legend}
+        <p class="small">${navLink('board', 'All stops and shuttles')}</p>`;
+    }
 
-function renderStop() {
-  const i = cfg.stops.findIndex(s => s.id === param);
-  if (i < 0) { $app.innerHTML = '<p>Unknown stop. <a href="/">See all stops</a></p>'; return; }
-  const s = cfg.stops[i], st = state.stops[i], e = st.etas[0];
-  $app.innerHTML = `
-    <div class="muted small">You're at</div>
-    <h1>${esc(s.name)}</h1>
-    <div class="card row"><div><div class="muted small">Next shuttle (estimate)</div>
-      ${state.buses.map(busLine).join('')}
-      ${e?.source === 'typical' ? `<div class="muted small">No live reports — estimate from the last ${e.days} days</div>` : ''}</div>
-      ${etaHtml(e)}</div>
-    <div class="muted small" style="margin:-4px 0 8px">${st.waiting} ${st.waiting === 1 ? 'person' : 'people'} waiting here</div>
-    <button class="primary" id="arrive">🚌 The shuttle is here</button>
-    <button id="wait">🙋 I'm waiting</button>
-    ${busPicker('bus')}
-    <a class="btn" href="/">See all stops</a>`;
-  const bus = () => document.getElementById('bus')?.value;
-  document.getElementById('arrive').onclick = () => report({ type: 'arrive', stop: s.id, bus: bus() }, 'Thanks! Everyone can see it now.');
-  document.getElementById('wait').onclick = () => report({ type: 'wait', stop: s.id }, 'Got it — you\'re counted as waiting.');
-}
+    function busView() {
+      const b = state.buses.find(x => x.id === route.id);
+      if (!b) return `<p>This QR code doesn’t match a shuttle. ${navLink('board', 'See all stops')}</p>`;
+      const next = b.next;
+      const others = cfg.stops.filter(s => s.id !== next);
+      const stopBtn = (s, cls) => `<button class="btn ${cls}" data-act="here" data-stop="${s.id}">${cls ? 'We’re at ' : ''}${esc(s.name)}</button>`;
+      return `
+        <p class="eyebrow">You’re riding</p>
+        <h1>${esc(b.name)}</h1>
+        ${busStatus(b)}
+        <h2>When the shuttle pulls in</h2>
+        ${next ? `<div class="actions">${stopBtn(cfg.stops.find(s => s.id === next), 'primary')}</div>
+          <details class="other-stops"><summary>At a different stop?</summary><div class="actions">${others.map(s => stopBtn(s, '')).join('')}</div></details>`
+          : `<div class="actions">${cfg.stops.map(s => stopBtn(s, '')).join('')}</div>`}
+        <div class="map-slot"></div>${legend}
+        <h2>Hands-free</h2>
+        <button class="btn" data-act="share">${sharing ? 'Stop sharing my location' : 'Share my location while I ride'}</button>
+        <p class="small muted">Sends your position every 30 seconds for up to 30 minutes while this page is open. Others only see the shuttle’s position.</p>`;
+    }
 
-function renderBus() {
-  const b = cfg.shuttles.find(x => x.id === param);
-  if (!b) { $app.innerHTML = '<p>Unknown shuttle. <a href="/">Home</a></p>'; return; }
-  const n = nearest();
-  $app.innerHTML = `
-    <div class="muted small">You're riding</div>
-    <h1>${esc(b.name)}</h1>
-    <div class="card">${busLine(state.buses.find(x => x.id === b.id))}</div>
-    <h2>Where are we?</h2>
-    <p class="small muted" style="margin-top:0">Tap a stop when the shuttle pulls in.</p>
-    ${cfg.stops.map(s => `<button data-stop="${s.id}" class="${n && n.s.id === s.id && n.d < 400 ? 'primary' : ''}">${esc(s.name)}</button>`).join('')}
-    <h2>Hands-free</h2>
-    <button id="share">${sharing ? '⏹ Stop sharing my location' : '📡 Share my location while I ride'}</button>
-    <p class="small muted">Your phone sends its position every ~30 s for up to 30 min (only while this page is open). Only the nearest stop is shown to others.</p>`;
-  $app.querySelectorAll('[data-stop]').forEach(btn => btn.onclick = () =>
-    report({ type: 'arrive', stop: btn.dataset.stop, bus: b.id }, 'Thanks! Position updated.'));
-  document.getElementById('share').onclick = () => {
-    if (sharing) { stopSharing(); render(); return; }
-    if (!navigator.geolocation) return toast('Location unavailable');
-    const started = Date.now(); let last = 0;
-    sharing = navigator.geolocation.watchPosition(p => {
-      myPos = { lat: p.coords.latitude, lng: p.coords.longitude };
-      if (Date.now() - started > 30 * 60000) { stopSharing(); render(); return; }
-      if (Date.now() - last < 30000) return;
-      last = Date.now();
-      fetch('/api/report', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'gps', bus: b.id, device, ...myPos }) }).catch(() => {});
-    }, () => { toast('Location permission denied'); stopSharing(); render(); }, { enableHighAccuracy: true });
-    toast('Sharing location — keep this page open');
-    render();
+    function render() {
+      if (!cfg || !state) return;
+      const html = route.kind === 's' ? stopView() : route.kind === 'b' ? busView() : board();
+      if (html !== lastHtml) {
+        const open = rootEl.querySelector('details')?.open;
+        rootEl.querySelector('.views')?.remove();
+        const v = document.createElement('div'); v.className = 'views'; v.innerHTML = html;
+        rootEl.prepend(v); lastHtml = html;
+        if (open && v.querySelector('details')) v.querySelector('details').open = true;
+        v.querySelector('.map-slot')?.append(map.el);
+      }
+      map.update(state, { highlight: route.kind === 's' ? route.id : null, focus: route.kind === 'b' ? route.id : null });
+    }
+    async function refresh() { try { state = await api.state(); render(); } catch {} }
+
+    function stopSharing() { if (sharing != null) api.geo.clear(sharing); sharing = null; }
+    rootEl.addEventListener('click', ev => {
+      const nav = ev.target.closest('[data-nav]');
+      if (nav && onNavigate) { ev.preventDefault(); onNavigate(nav.dataset.nav); return; }
+      const btn = ev.target.closest('[data-act]');
+      if (!btn) return;
+      const act = btn.dataset.act;
+      if (act === 'arrive') report({ type: 'arrive', stop: route.id, bus: btn.dataset.bus }, 'Thanks! Everyone can see it now.');
+      if (act === 'wait') report({ type: 'wait', stop: route.id }, 'Got it. You’re counted as waiting.');
+      if (act === 'here') report({ type: 'arrive', stop: btn.dataset.stop, bus: route.id }, `Thanks! Marked at ${stopName(btn.dataset.stop)}.`);
+      if (act === 'share') {
+        if (sharing != null) { stopSharing(); lastHtml = ''; render(); return; }
+        const started = state.now; let last = 0;
+        sharing = api.geo.watch(p => {
+          if (state.now - started > 30 * 60000) { stopSharing(); lastHtml = ''; render(); return; }
+          if (state.now - last < 30000) return;
+          last = state.now;
+          api.report({ type: 'gps', bus: route.id, device, k: route.k, lat: p.lat, lng: p.lng }).catch(() => {});
+        }, () => { toast('Location is off for this site. Turn it on in your browser settings.'); stopSharing(); lastHtml = ''; render(); });
+        toast('Sharing location. Keep this page open.');
+        lastHtml = ''; render();
+      }
+    });
+
+    (async () => {
+      cfg = await api.config();
+      timeFmt = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZone: cfg.timezone || undefined });
+      map = root.ShuttleMap.create(cfg);
+      await refresh();
+      if (refreshMs) setInterval(refresh, refreshMs);
+    })();
+    return { refresh, setRoute(r) { route = r; stopSharing(); lastHtml = ''; render(); } };
+  }
+
+  // ---- the real site ----
+  const httpApi = {
+    config: () => fetch('/api/config').then(r => r.json()),
+    state: () => fetch('/api/state').then(r => r.json()),
+    report: body => fetch('/api/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(async r => ({ ok: r.ok, ...(await r.json()) })),
+    geo: {
+      watch: (cb, err) => navigator.geolocation ? navigator.geolocation.watchPosition(p => cb({ lat: p.coords.latitude, lng: p.coords.longitude }), err, { enableHighAccuracy: true }) : (err(), null),
+      clear: id => navigator.geolocation?.clearWatch(id),
+    },
   };
-}
-function stopSharing() { if (sharing != null) navigator.geolocation.clearWatch(sharing); sharing = null; }
-
-function render() {
-  if (!cfg || !state) return;
-  if (kind === 's') renderStop(); else if (kind === 'b') renderBus(); else renderBoard();
-}
-
-(async () => {
-  cfg = await (await fetch('/api/config')).json();
-  document.title = cfg.title; document.getElementById('title').textContent = cfg.title;
-  await refresh();
-  if (kind === 'b') locate().then(render); // pre-highlight the stop we're at
-  setInterval(refresh, 15000);
-})();
+  function boot() {
+    const host = document.getElementById('app');
+    if (!host || root.SHUTTLE_NO_AUTOBOOT) return;
+    const [, kind, id] = location.pathname.split('/');
+    const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+    let k = new URLSearchParams(location.search).get('k');
+    if (k) store.set('k:' + location.pathname, k); else k = store.get('k:' + location.pathname);
+    let device = store.get('dev');
+    if (!device) { device = (crypto.randomUUID?.() || Math.random().toString(36).slice(2)); store.set('dev', device); }
+    httpApi.config().then(c => { document.title = c.title; const h = document.getElementById('title'); if (h) h.textContent = c.title; });
+    mountApp(host, { api: httpApi, route: { kind, id: id && decodeURIComponent(id), k }, device });
+  }
+  root.ShuttleApp = { mountApp };
+  if (typeof document !== 'undefined') document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', boot) : boot();
+})(window);

@@ -15,17 +15,20 @@
 </style>
 </head>
 <body>
-<div class="note"><h1>QR signs</h1><p>Print this page (Ctrl/Cmd + P). Post the stop signs at each stop and the shuttle signs inside each shuttle. Open this page from your <b>live</b> URL so the codes point to the right site.</p></div>
+<div class="note"><h1>QR signs</h1><p>Print this page (Ctrl/Cmd + P). Each code only works for its own place: post each stop’s sign at that stop, and each shuttle’s sign inside that shuttle. Open this page from your <b>live</b> site so the codes point to it. If you set <code>QR_SECRET</code>, open it as <code>/qr?key=ADMIN_KEY</code>.</p></div>
 <div class="sheet" id="sheet"></div>
 <script>
 (async () => {
-  const cfg = await (await fetch('/api/config')).json();
+  const res = await fetch('/api/qr-links' + location.search);
+  if (!res.ok) { document.getElementById('sheet').textContent = (await res.json()).error; return; }
+  const links = await res.json();
   const qr = url => { const q = qrcode(0, 'M'); q.addData(url); q.make(); return q.createSvgTag({ cellSize: 6, margin: 2, scalable: true }); };
-  const card = (title, sub, url) => `<div class="sign"><h2>${title}</h2><p>${sub}</p>${qr(url)}<div class="url">${url}</div></div>`;
+  const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const card = (title, sub, url) => `<div class="sign"><h2>${esc(title)}</h2><p>${sub}</p>${qr(url)}<div class="url">${esc(url.replace(/\?k=.*/, ''))}</div></div>`;
   const base = location.origin;
-  document.getElementById('sheet').innerHTML =
-    cfg.stops.map(s => card('🚏 ' + s.name, 'Scan to see when the shuttle is coming<br>& tap when it arrives', `${base}/s/${s.id}`)).join('') +
-    cfg.shuttles.map(b => card('🚌 ' + b.name, 'Riding? Scan & tap the stop we\'re at<br>to help everyone waiting', `${base}/b/${b.id}`)).join('');
+  document.getElementById('sheet').innerHTML = links.map(l => l.kind === 'stop'
+    ? card(l.name, 'Shuttle stop. Scan to see when the next shuttle comes,<br>and tap when it pulls in.', base + l.path)
+    : card(l.name, 'Riding? Scan and tap the stop we’re at.<br>It helps everyone waiting.', base + l.path)).join('');
 })();
 </script>
 </body>

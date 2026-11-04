@@ -1,0 +1,68 @@
+/* Simulator layout: control-room board on the left (map, controls, scores, log), two phones on the right
+   running the real rider app. Shares tokens with style.css. */
+.sim-body { min-height: 100%; }
+.sim-top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
+  background: var(--route); color: var(--route-ink); padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.sim-body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--route); }
+.sim-title { font: 600 22px/1 var(--font-sign); letter-spacing: .02em; margin: 0; }
+.sim-clock { font: 600 30px/1 var(--font-sign); font-variant-numeric: tabular-nums; margin-left: auto; min-width: 5.2em; text-align: right; }
+.transport { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tbtn { font: 700 14px/1 var(--font-body); padding: 9px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--route-ink) 45%, transparent); background: transparent; color: var(--route-ink); }
+.tbtn[aria-pressed="true"] { background: var(--route-ink); color: var(--route); }
+.tbtn:focus-visible, .cbtn:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.speed { display: flex; gap: 4px; }
+
+.sim-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; max-width: 1360px; margin: 0 auto; padding-block: 16px 32px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); align-items: start; }
+.board { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
+.panel h2 { font: 600 14px/1 var(--font-sign); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.panel .route-map { border: 0; padding: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; background: var(--ink); }
+.legend i.dash { background: none; border: 2px dashed var(--muted); border-radius: 50%; width: 14px; height: 14px; }
+.legend i.red { background: var(--late); }
+.check { display: inline-flex; gap: 6px; align-items: center; font-size: 14px; cursor: pointer; }
+
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.fleet { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.fleet li { display: grid; grid-template-columns: 6.5em 1fr; gap: 0 10px; font-size: 14px; }
+.fleet li b:first-child { grid-row: span 2; font-family: var(--font-sign); font-size: 17px; }
+.fleet .late { color: var(--late); }
+.scores { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.scores div { display: flex; flex-direction: column-reverse; }
+.scores dt { font-size: 12px; color: var(--muted); }
+.scores dd { margin: 0; font: 600 28px/1.1 var(--font-sign); font-variant-numeric: tabular-nums; }
+
+.controls { display: flex; flex-direction: column; gap: 12px; }
+.slider { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 14px; }
+.slider input { grid-column: 1 / -1; width: 100%; accent-color: var(--route); }
+.slider output { font-variant-numeric: tabular-nums; font-weight: 700; }
+.btnrow { display: flex; flex-wrap: wrap; gap: 8px; }
+.cbtn { font: 700 14px/1.2 var(--font-body); padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+.cbtn.warn { color: var(--late); }
+.hint { font-size: 13px; color: var(--muted); margin: 0; }
+
+.log { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
+.log li { display: grid; grid-template-columns: 4.6em 1fr; gap: 8px; }
+.log time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.log .k-jam span, .log .k-prank span { color: var(--late); font-weight: 700; }
+.log .k-you span { color: var(--route); font-weight: 700; }
+
+.phones { display: flex; gap: 16px; align-items: start; }
+.phone { margin: 0; width: 340px; max-width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.phone figcaption { font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+.phone select { font: 600 15px var(--font-body); padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+.screen { height: 660px; overflow-y: auto; border: 10px solid var(--ink); border-radius: 30px; background: var(--bg); padding: 16px 14px;
+  transform: translateZ(0); /* keeps the app's toasts inside the phone */ }
+.screen .toast { left: 10px; right: 10px; bottom: 10px; font-size: 14px; }
+.screen h1 { font-size: 30px; }
+
+@media (max-width: 1120px) {
+  .sim-grid { grid-template-columns: minmax(0, 1fr); }
+  .phones { order: -1; flex-wrap: wrap; justify-content: center; }
+}
+@media (max-width: 420px) { .screen { height: 600px; border-width: 6px; border-radius: 22px; } .sim-clock { margin-left: 0; } }

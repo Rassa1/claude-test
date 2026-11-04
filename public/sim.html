@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- sim:head -->
+<title>Shuttle Simulator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Semi+Condensed:wght@500;600&display=swap">
+<!-- /sim:head -->
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/sim.css">
+</head>
+<body class="sim-body">
+<!-- sim:body -->
+<header class="sim-top">
+  <h1 class="sim-title">Shuttle Simulator</h1>
+  <div class="transport">
+    <button class="tbtn" id="play" aria-pressed="false">Pause</button>
+    <div class="speed" role="group" aria-label="Simulation speed">
+      <button class="tbtn" data-speed="1" aria-pressed="false">1×</button>
+      <button class="tbtn" data-speed="10" aria-pressed="false">10×</button>
+      <button class="tbtn" data-speed="30" aria-pressed="true">30×</button>
+      <button class="tbtn" data-speed="60" aria-pressed="false">60×</button>
+    </div>
+  </div>
+  <div class="sim-clock" id="clock" aria-live="off">--:--</div>
+</header>
+<main class="sim-grid">
+  <div class="board">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Route map</h2>
+        <label class="check"><input type="checkbox" id="ghosts" checked> Show where shuttles really are</label>
+      </div>
+      <div id="bigmap"></div>
+      <p class="legend"><span><i></i>Where the app thinks each shuttle is</span><span><i class="dash"></i>Where it really is (only the simulator knows)</span><span><i class="red"></i>Behind schedule</span></p>
+    </section>
+    <div class="two">
+      <section class="panel">
+        <h2>Shuttles</h2>
+        <ul class="fleet" id="fleet"></ul>
+      </section>
+      <section class="panel">
+        <h2>How accurate is the app?</h2>
+        <dl class="scores">
+          <div><dt>typical ETA error</dt><dd id="s-median">—</dd></div>
+          <div><dt>ETAs within 2 min</dt><dd id="s-within">—</dd></div>
+          <div><dt>late shuttles flagged</dt><dd id="s-caught">—</dd></div>
+          <div><dt>false “behind schedule”</dt><dd id="s-false">—</dd></div>
+        </dl>
+      </section>
+    </div>
+    <section class="panel controls">
+      <h2>Try things</h2>
+      <label class="slider" for="tap">Riders who tap the QR page <output id="tapOut">30%</output><input type="range" id="tap" min="0" max="100" value="30"></label>
+      <label class="slider" for="gps">Riders sharing location <output id="gpsOut">0%</output><input type="range" id="gps" min="0" max="30" value="0"></label>
+      <div class="btnrow" id="jams"></div>
+      <div class="btnrow">
+        <button class="cbtn warn" id="prank">Send a fake report</button>
+        <button class="cbtn" id="skip">Skip ahead 15 min</button>
+      </div>
+      <div class="btnrow">
+        <label class="check"><input type="checkbox" id="history" checked> App has 10 days of past data</label>
+        <button class="cbtn" id="restart">Restart the morning</button>
+      </div>
+      <p class="hint">Set taps to 0% to see estimates from past data and the timetable alone. Use the phones to report yourself: tap “is here” when the dashed circle reaches your stop.</p>
+    </section>
+    <section class="panel">
+      <h2>What’s happening</h2>
+      <ol class="log" id="log"></ol>
+    </section>
+  </div>
+  <div class="phones">
+    <figure class="phone">
+      <figcaption><label for="stopPick">Phone that scanned the QR code at</label><select id="stopPick"></select></figcaption>
+      <div class="screen" id="phoneStop"></div>
+    </figure>
+    <figure class="phone">
+      <figcaption><label for="busPick">Phone that scanned the QR code inside</label><select id="busPick"></select></figcaption>
+      <div class="screen" id="phoneBus"></div>
+    </figure>
+  </div>
+</main>
+<!-- /sim:body -->
+<script>window.SHUTTLE_NO_AUTOBOOT = true;</script>
+<script src="/sim-config.js"></script>
+<script src="/core.js"></script>
+<script src="/world.js"></script>
+<script src="/map.js"></script>
+<script src="/app.js"></script>
+<script src="/sim.js"></script>
+</body>
+</html>
