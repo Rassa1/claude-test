@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Printable QR Codes</title>
+<script src="/qrcode.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #fff; color: #111; }
+  .note { max-width: 700px; } @media print { .note { display: none; } }
+  .sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .sign { border: 2px solid #111; border-radius: 16px; padding: 20px; text-align: center; break-inside: avoid; }
+  .sign h2 { margin: 0 0 4px; font-size: 26px; } .sign p { margin: 6px 0; }
+  .sign svg { width: 220px; height: 220px; } .url { font-size: 12px; color: #555; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="note"><h1>QR signs</h1><p>Print this page (Ctrl/Cmd + P). Post the stop signs at each stop and the shuttle signs inside each shuttle. Open this page from your <b>live</b> URL so the codes point to the right site.</p></div>
+<div class="sheet" id="sheet"></div>
+<script>
+(async () => {
+  const cfg = await (await fetch('/api/config')).json();
+  const qr = url => { const q = qrcode(0, 'M'); q.addData(url); q.make(); return q.createSvgTag({ cellSize: 6, margin: 2, scalable: true }); };
+  const card = (title, sub, url) => `<div class="sign"><h2>${title}</h2><p>${sub}</p>${qr(url)}<div class="url">${url}</div></div>`;
+  const base = location.origin;
+  document.getElementById('sheet').innerHTML =
+    cfg.stops.map(s => card('🚏 ' + s.name, 'Scan to see when the shuttle is coming<br>& tap when it arrives', `${base}/s/${s.id}`)).join('') +
+    cfg.shuttles.map(b => card('🚌 ' + b.name, 'Riding? Scan & tap the stop we\'re at<br>to help everyone waiting', `${base}/b/${b.id}`)).join('');
+})();
+</script>
+</body>
+</html>

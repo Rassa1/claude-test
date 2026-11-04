@@ -1,0 +1,15 @@
+{
+  "title": "Campus Shuttle",
+  "staleAfterMinutes": 45,
+  "waitingExpiresMinutes": 20,
+  "shuttles": [
+    { "id": "A", "name": "Shuttle A" }
+  ],
+  "stops": [
+    { "id": "main-gate",  "name": "Main Gate",        "lat": 40.0000, "lng": -75.0000, "minsFromPrev": 7 },
+    { "id": "library",    "name": "Library",          "lat": 40.0030, "lng": -75.0020, "minsFromPrev": 4 },
+    { "id": "dorms",      "name": "Residence Halls",  "lat": 40.0060, "lng": -75.0010, "minsFromPrev": 5 },
+    { "id": "athletics",  "name": "Athletics Center", "lat": 40.0050, "lng": -74.9970, "minsFromPrev": 6 },
+    { "id": "station",    "name": "Train Station",    "lat": 40.0010, "lng": -74.9950, "minsFromPrev": 8 }
+  ]
+}

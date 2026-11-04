@@ -1,0 +1,9 @@
+{
+  "name": "shuttle-tracker",
+  "version": "1.0.0",
+  "description": "Crowd-sourced shuttle tracker using QR codes — no tracking hardware.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=20" },
+  "license": "MIT"
+}
