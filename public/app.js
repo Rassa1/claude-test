@@ -9,10 +9,14 @@ let cfg, state, myPos = null, sharing = null;
 const [, kind, param] = location.pathname.split('/');
 
 function ago(t) {
-  const m = Math.round((Date.now() - t) / 60000);
+  const m = Math.round(((state?.now ?? Date.now()) - t) / 60000); // server clock, avoids phone clock skew
   return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
 }
-function etaText(mins) { return mins === 0 ? 'Now' : `${mins} min`; }
+function etaHtml(e) {
+  if (!e) return '<div class="eta">—</div>';
+  if (e.source === 'typical') return `<div class="eta typical">~${e.mins} min<div class="eta-src">usual time</div></div>`;
+  return `<div class="eta ${e.mins === 0 ? 'now' : ''}">${e.mins === 0 ? 'Now' : `${e.mins} min`}</div>`;
+}
 function dist(a, b) {
   const R = 6371000, r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r;
   return 2 * R * Math.asin(Math.sqrt(Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2));
@@ -60,7 +64,7 @@ function stopCard(s, st, near) {
   return `<a class="card row" href="/s/${s.id}" style="color:inherit;text-decoration:none">
     <div><div class="stop-name">${esc(s.name)} ${near ? '<span class="pill near">nearest</span>' : ''}</div>
       <div class="muted small">${st.waiting ? `${st.waiting} waiting · ` : ''}${st.lastArrival ? `last seen ${ago(st.lastArrival)}` : 'no sightings yet'}</div></div>
-    <div class="eta ${e?.mins === 0 ? 'now' : ''}">${e ? etaText(e.mins) : '—'}</div></a>`;
+    ${etaHtml(e)}</a>`;
 }
 
 function renderBoard() {
@@ -93,8 +97,9 @@ function renderStop() {
     <div class="muted small">You're at</div>
     <h1>${esc(s.name)}</h1>
     <div class="card row"><div><div class="muted small">Next shuttle (estimate)</div>
-      ${state.buses.map(busLine).join('')}</div>
-      <div class="eta ${e?.mins === 0 ? 'now' : ''}">${e ? etaText(e.mins) : '—'}</div></div>
+      ${state.buses.map(busLine).join('')}
+      ${e?.source === 'typical' ? `<div class="muted small">No live reports — estimate from the last ${e.days} days</div>` : ''}</div>
+      ${etaHtml(e)}</div>
     <div class="muted small" style="margin:-4px 0 8px">${st.waiting} ${st.waiting === 1 ? 'person' : 'people'} waiting here</div>
     <button class="primary" id="arrive">🚌 The shuttle is here</button>
     <button id="wait">🙋 I'm waiting</button>

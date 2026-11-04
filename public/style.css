@@ -12,6 +12,8 @@ footer { text-align:center; font-size:13px; padding:24px 16px; }
 .stop-name { font-weight:600; }
 .eta { font-size:22px; font-weight:700; white-space:nowrap; }
 .eta.now { color:var(--ok); }
+.eta.typical { color:var(--muted); text-align:right; }
+.eta-src { font-size:11px; font-weight:500; }
 .small { font-size:13px; }
 .pill { display:inline-block; font-size:12px; padding:2px 8px; border-radius:99px; background:var(--bg); border:1px solid var(--line); }
 .pill.near { border-color:var(--accent); color:var(--accent); }

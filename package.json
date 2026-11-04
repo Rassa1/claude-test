@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Crowd-sourced shuttle tracker using QR codes — no tracking hardware.",
   "main": "server.js",
-  "scripts": { "start": "node server.js" },
+  "scripts": { "start": "node server.js", "test": "node --test", "sim": "node sim/simulate.js", "sim:live": "node sim/simulate.js --live" },
   "engines": { "node": ">=20" },
   "license": "MIT"
 }

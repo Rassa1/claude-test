@@ -1,5 +1,6 @@
 {
   "title": "Campus Shuttle",
+  "timezone": "America/New_York",
   "staleAfterMinutes": 45,
   "waitingExpiresMinutes": 20,
   "shuttles": [
