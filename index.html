@@ -11,7 +11,7 @@
     <div class="brand"><span class="logo"></span>Taillight Studio</div>
     <nav class="tabs">
       <button data-tab="build" class="active"><b>1</b> Build matrix</button>
-      <button data-tab="animate"><b>2</b> Buttons &amp; animate</button>
+      <button data-tab="animate"><b>2</b> Inputs &amp; effects</button>
       <button data-tab="code"><b>3</b> ESP32 code</button>
     </nav>
   </header>
@@ -70,7 +70,7 @@
         <label><input type="checkbox" id="showWiring" checked /> Show data path</label>
         <label><input type="checkbox" id="showIndex" /> Show LED numbers</label>
       </div>
-      <button class="primary wide" data-goto="animate">Next: buttons &amp; animate →</button>
+      <button class="primary wide" data-goto="animate">Next: inputs &amp; effects →</button>
     </aside>
   </main>
 
@@ -83,17 +83,24 @@
         </div>
         <div class="stage-top-right">
           <label class="inline-sm">Speed <select id="simSpeed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
-          <button id="allOff" class="ghost sm">All off</button>
+          <span class="mono simclock" id="simClock" title="Time since the simulated ESP32 powered up">0:00</span>
+          <button id="skip30" class="ghost sm" title="Jump the clock forward 30 seconds">+30 s</button>
+          <button id="reboot" class="ghost sm" title="Restart the simulated ESP32 (as if its power was cut)">Power-cycle ESP32</button>
+          <button id="allOff" class="ghost sm">All wires off</button>
         </div>
       </div>
       <canvas id="simCanvas"></canvas>
       <div class="btnbar" id="btnbar"></div>
-      <div class="bar-hint">Click toggles · hold momentary buttons · keys 1–9 work too</div>
+      <div class="bar-hint">These are your input wires. Click to switch one on/off, hold for a quick press · keys 1–9</div>
     </section>
     <aside class="panel">
-      <h2>Buttons <span class="muted small">top = drawn on top</span></h2>
-      <div id="btnList" class="btnlist"></div>
-      <button id="addBtn" class="ghost wide sm-top">+ Add button</button>
+      <h2>Inputs <span class="muted small">wires into the ESP32</span></h2>
+      <div id="inList" class="inlist"></div>
+      <button id="addIn" class="ghost wide sm-top">+ Add input</button>
+
+      <h2 class="h2-gap">Effects <span class="muted small">top = drawn on top</span></h2>
+      <div id="fxList" class="btnlist"></div>
+      <button id="addFx" class="ghost wide sm-top">+ Add effect</button>
 
       <div id="btnEditor"></div>
     </aside>
@@ -122,14 +129,14 @@
       <h3>Pins</h3>
       <div id="pinTable" class="pintable"></div>
       <div id="codeWarn" class="pinwarn"></div>
-      <p class="muted small-p">LED data pins are set on the Build tab, button pins on the Buttons tab.</p>
+      <p class="muted small-p">LED data pins are set on the Build tab, input pins on the Inputs &amp; effects tab.</p>
       <h3>How to flash it</h3>
       <ol class="steps-help">
         <li>Install the <b>Arduino IDE</b> and add ESP32 support (Boards Manager → “esp32” by Espressif).</li>
         <li>Library Manager → install <b>FastLED</b>.</li>
         <li>Paste the code into a new sketch (or open the downloaded .ino).</li>
         <li>Tools → Board → your ESP32 board, pick the port, press Upload.</li>
-        <li>Wire each button between its GPIO and GND. Pins are set per button on the Buttons tab.</li>
+        <li>Each input pin is ON when pulled to GND. For 12V car wires use an optocoupler per input (see the code comments).</li>
       </ol>
       <p class="warn">Check your local laws: rear lights generally must be red (amber for indicators) and can't flash, except signals. Rainbow/sparkle effects are for shows only.</p>
     </aside>

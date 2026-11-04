@@ -2,7 +2,7 @@
 // simulator exactly: same animation math, same button/layer rules.
 import { ANIMS, DIRS } from './animations.js';
 import { CPP_HELPERS } from './custom.js';
-import { SIDE_MASK } from './engine.js';
+import { SIDE_MASK, condMasks, totalMs, stepMs } from './engine.js';
 
 const wrap = (arr, per = 20, indent = '  ') => {
   const lines = [];
@@ -21,7 +21,8 @@ function describe(s) {
   return bits.join(' · ');
 }
 
-export function generateSketch(matrix, layout, buttons) {
+export function generateSketch(matrix, layout, model) {
+  const { inputs, effects } = model;
   const n = layout.leds.length;
   const U = layout.leds.map((l) => l.qu);
   const V = layout.leds.map((l) => l.qv);
@@ -31,13 +32,22 @@ export function generateSketch(matrix, layout, buttons) {
   const pinOf = (o, side) => (side ? o.pinR : o.pinL);
   const rowList = (rows) => rows.map((r) => r + 1).join(', ');
   const rowsDesc = matrix.rows.map((r, i) => ` *   row ${i + 1}: ${r.count} LEDs, shifted ${(+r.offset).toFixed(1)} mm`).join('\n');
-  const usesCustom = buttons.some((b) => b.steps.some((s) => s.type === 'custom'));
+  const usesCustom = effects.some((b) => b.steps.some((s) => s.type === 'custom'));
+  const inName = (id) => inputs.find((x) => x.id === id)?.name || '?';
+  const condText = (fx) => {
+    const parts = Object.entries(fx.trigger.conds).filter(([id, c]) => c !== 'ignore' && inputs.some((x) => x.id === id)).map(([id, c]) => `${inName(id)} ${c.toUpperCase()}`);
+    return parts.length ? parts.join(fx.trigger.match === 'any' ? ' OR ' : ' AND ') : '(never – no inputs selected)';
+  };
+  const trigText = (fx) => fx.trigger.kind === 'once'
+    ? `once when [${condText(fx)}] turns on${fx.trigger.minOffMs ? ` after being off for ${fx.trigger.minOffMs / 1000} s+` : ''}${fx.trigger.cancel ? ', stops early if it turns off' : ''}`
+    : `while [${condText(fx)}]`;
+  const inDocs = inputs.map((x, k) => ` *   ${k}. ${cmt(x.name)} – GPIO ${x.pin}, ${x.type === 'toggle' ? 'push button (press = on/off)' : `on while signal present${x.holdMs ? `, held ${x.holdMs} ms after it drops` : ''}`}`).join('\n');
 
-  const btnDocs = buttons.map((b, k) =>
-    ` *   ${k + 1}. ${cmt(b.name)} – GPIO ${b.pin}, ${b.mode === 'toggle' ? 'toggle (press on / press off)' : 'momentary (on while held)'}${b.mode !== 'toggle' && b.releaseMs ? `, stays on ${b.releaseMs} ms after release` : ''}, ${b.side} light${b.side === 'both' ? 's' : ''}, ${b.layer === 'overlay' ? 'layered on top' : 'replaces lower layers'}\n` +
+  const btnDocs = effects.map((b, k) =>
+    ` *   ${k + 1}. ${cmt(b.name)} – ${cmt(trigText(b))}, ${b.side} light${b.side === 'both' ? 's' : ''}, ${b.layer === 'overlay' ? 'layered on top' : 'replaces lower layers'}\n` +
     b.steps.map((s, j) => ` *        ${j + 1}) ${cmt(describe(s))}`).join('\n')).join('\n');
 
-  const stepFns = buttons.map((b, bk) => b.steps.map((s, k) => {
+  const stepFns = effects.map((b, bk) => b.steps.map((s, k) => {
     const def = ANIMS[s.type] || ANIMS.off;
     return `// ${cmt(b.name)} – step ${k + 1}: ${cmt(describe(s))}
 static CRGB b${bk}s${k}(int i_, float u, float v, float o, int side_, float t) {
@@ -48,13 +58,14 @@ static CRGB b${bk}s${k}(int i_, float u, float v, float o, int side_, float t) {
 }`;
   }).join('\n\n')).join('\n\n');
 
-  const stepArrays = buttons.map((b, bk) =>
-    `static const uint32_t B${bk}_MS[] = { ${b.steps.map((s) => Math.max(1, Math.round(s.duration * 1000))).join(', ')} };`).join('\n');
-  const btnTable = buttons.map((b, bk) => {
-    const tot = b.steps.reduce((a, s) => a + Math.max(1, Math.round(s.duration * 1000)), 0);
-    return `  { ${b.pin}, ${b.mode === 'toggle'}, ${SIDE_MASK[b.side] || 3}, ${b.layer === 'overlay'}, ${!!b.repeat}, ${b.mode === 'toggle' ? 0 : (b.releaseMs | 0)}, ${b.steps.length}, B${bk}_MS, ${tot} },  // ${cmt(b.name)}`;
+  const stepArrays = effects.map((b, bk) =>
+    `static const uint32_t B${bk}_MS[] = { ${b.steps.length ? b.steps.map(stepMs).join(', ') : '1'} };`).join('\n');
+  const inTable = inputs.map((x) => `  { ${x.pin}, ${x.type === 'toggle'}, ${x.type === 'toggle' ? 0 : (x.holdMs | 0)} },  // ${cmt(x.name)}`).join('\n');
+  const btnTable = effects.map((b, bk) => {
+    const m = condMasks(b, inputs);
+    return `  { ${b.trigger.kind === 'once' ? 1 : 0}, 0x${m.needOn.toString(16)}u, 0x${m.needOff.toString(16)}u, ${b.trigger.match !== 'any'}, ${b.trigger.kind === 'once' ? (b.trigger.minOffMs | 0) : 0}u, ${!!b.trigger.cancel}, ${SIDE_MASK[b.side] || 3}, ${b.layer === 'overlay'}, ${b.trigger.kind === 'while' && !!b.repeat}, ${b.steps.length}, B${bk}_MS, ${totalMs(b) || 1} },  // ${cmt(b.name)}`;
   }).join('\n');
-  const dispatch = buttons.map((b, bk) =>
+  const dispatch = effects.map((b, bk) =>
     `    case ${bk}: switch (step) {\n${b.steps.map((_, k) => `      case ${k}: return b${bk}s${k}(i, u, v, o, side, t);`).join('\n')}\n    } break;`).join('\n');
 
   return `/*
@@ -71,16 +82,20 @@ ${sideIds.map((s) => outs.map((o) => ` *   ${s ? 'Right' : 'Left'} light, data l
  *   LED 5V -> 5V supply (NOT the ESP32 3V3 pin), LED GND -> supply GND + ESP32 GND.
  *   In a car use a 12V -> 5V buck converter rated for the current below.
  *
- * Inputs: each button connects its GPIO to GND when pressed (internal pull-up used).
- *   For 12V car signals (brake / indicator wires) use an optocoupler (e.g. PC817) per input:
- *   12V signal -> 1k resistor -> opto LED -> GND; opto transistor between GPIO and GND.
- *   Indicator wires pulse on/off: use "momentary" with a release delay (~800 ms) so the animation runs smoothly.
+ * Inputs (a signal pulls its GPIO to GND = ON; internal pull-ups used):
+${inDocs}
+ *   For 12V car wires (running / brake / blinkers) use an optocoupler (e.g. PC817) per input:
+ *   12V wire -> 1k resistor -> opto LED -> GND; opto transistor between GPIO and GND.
+ *   Blinker wires pulse on/off: give them a hold time (~800 ms) so they read as one continuous ON.
+ *   Power the ESP32 from a feed that stays on (ignition or permanent 12V via a buck converter) so
+ *   "once" effects can tell how long the lights were off. If it's powered from the running-light wire,
+ *   it restarts every time the lights come on and every "once" effect replays.
  *
  * Light: ${n} LEDs per light, ${matrix.rows.length} rows, ${matrix.ledsPerMeter} LEDs/m, ${matrix.wiring} wiring from the ${matrix.start}.
  *   The right light is a mirror image of the left one (wire it the same way, mirrored).
 ${rowsDesc}
  *
- * Buttons (top = highest priority, drawn over the ones below it):
+ * Effects (top = highest priority, drawn over the ones below it):
 ${btnDocs}
  */
 
@@ -92,9 +107,12 @@ ${btnDocs}
 #define COLOR_ORDER     ${matrix.colorOrder}
 #define MAX_MILLIAMPS   ${matrix.maxMilliamps}        // FastLED dims everything to stay under this
 #define FRAME_MS        10          // ~100 fps
+#ifndef DEBOUNCE_MS
 #define DEBOUNCE_MS     25
+#endif
 #define NUM_SIDES       ${sideIds.length}
-#define NUM_BUTTONS     ${buttons.length}
+#define NUM_INPUTS      ${Math.max(1, inputs.length)}
+#define NUM_EFFECTS     ${Math.max(1, effects.length)}
 
 static const uint8_t SIDE_ID[NUM_SIDES] = { ${sideIds.join(', ')} };   // 0 = left, 1 = right
 CRGB leds[NUM_SIDES][NUM_LEDS];
@@ -137,54 +155,92 @@ ${usesCustom ? '\n' + CPP_HELPERS + '\n' : ''}
 // ---------------------------------------------------------------- animations
 ${stepFns}
 
-// ---------------------------------------------------------------- buttons
-struct Button {
+// ---------------------------------------------------------------- inputs
+struct Input {
   uint8_t pin;
-  bool toggle;          // true: press on / press off. false: on while held
+  bool toggle;          // true: push button, each press flips on/off
+  uint16_t holdMs;      // level inputs: stay ON this long after the signal drops
+};
+static const Input IN[NUM_INPUTS] = {
+${inTable}
+};
+bool rawSig[NUM_INPUTS], stableSig[NUM_INPUTS], prevSig[NUM_INPUTS], inOn[NUM_INPUTS], inEverOn[NUM_INPUTS];
+uint32_t lastFlip[NUM_INPUTS], inLastOn[NUM_INPUTS];
+
+static void debounceInputs(uint32_t now) {        // runs every loop()
+  for (int k = 0; k < NUM_INPUTS; k++) {
+    bool sig = digitalRead(IN[k].pin) == LOW;
+    if (sig != rawSig[k]) { rawSig[k] = sig; lastFlip[k] = now; }
+    if (sig != stableSig[k] && now - lastFlip[k] >= DEBOUNCE_MS) stableSig[k] = sig;
+  }
+}
+
+static uint32_t updateInputs(uint32_t now) {      // runs every frame, returns bit mask of ON inputs
+  uint32_t mask = 0;
+  for (int k = 0; k < NUM_INPUTS; k++) {
+    bool raw = stableSig[k];
+    if (IN[k].toggle) {
+      if (raw && !prevSig[k]) inOn[k] = !inOn[k];
+    } else {
+      if (raw) { inLastOn[k] = now; inEverOn[k] = true; }
+      inOn[k] = raw || (inEverOn[k] && now - inLastOn[k] < IN[k].holdMs);
+    }
+    prevSig[k] = raw;
+    if (inOn[k]) mask |= 1u << k;
+  }
+  return mask;
+}
+
+// ---------------------------------------------------------------- effects
+struct Effect {
+  uint8_t kind;         // 0 = while condition is true, 1 = once when it turns on
+  uint32_t needOn;      // inputs that must be ON  (bit k = input k)
+  uint32_t needOff;     // inputs that must be OFF
+  bool matchAll;        // true: every listed input must match. false: any one is enough
+  uint32_t minOffMs;    // once: only if the condition was off at least this long (or never on)
+  bool cancel;          // once: stop early if the condition turns off
   uint8_t sides;        // bit 0 = left light, bit 1 = right light
   bool overlay;         // true: only lit pixels cover lower layers
-  bool repeat;          // true: loop the steps. false: play once, hold last frame
-  uint16_t releaseMs;   // momentary: stay on this long after release
+  bool repeat;          // while: loop the steps (false = play once, hold last frame)
   uint8_t numSteps;
   const uint32_t* stepMs;
   uint32_t totalMs;
 };
 ${stepArrays}
-static const Button BTN[NUM_BUTTONS] = {
+static const Effect FX[NUM_EFFECTS] = {
 ${btnTable}
 };
+bool fxPrev[NUM_EFFECTS], fxActive[NUM_EFFECTS], fxEverOn[NUM_EFFECTS];
+uint32_t fxSince[NUM_EFFECTS], fxOffSince[NUM_EFFECTS];
 
-bool rawDown[NUM_BUTTONS], stableDown[NUM_BUTTONS], held[NUM_BUTTONS], toggledOn[NUM_BUTTONS];
-uint32_t lastFlip[NUM_BUTTONS], since[NUM_BUTTONS], lastRelease[NUM_BUTTONS];
-bool everReleased[NUM_BUTTONS];
-
-static bool isActive(int b, uint32_t now) {
-  if (BTN[b].toggle) return toggledOn[b];
-  return held[b] || (everReleased[b] && now - lastRelease[b] < BTN[b].releaseMs);
+static bool evalCond(const Effect& e, uint32_t on) {
+  if (!e.needOn && !e.needOff) return false;
+  if (!e.matchAll) return (on & e.needOn) || (~on & e.needOff);
+  return (on & e.needOn) == e.needOn && (on & e.needOff) == 0;
 }
 
-static void readButtons(uint32_t now) {
-  for (int b = 0; b < NUM_BUTTONS; b++) {
-    bool down = digitalRead(BTN[b].pin) == LOW;
-    if (down != rawDown[b]) { rawDown[b] = down; lastFlip[b] = now; }
-    if (down == stableDown[b] || now - lastFlip[b] < DEBOUNCE_MS) continue;
-    stableDown[b] = down;
-    if (down) {                                    // pressed
-      if (BTN[b].toggle) {
-        toggledOn[b] = !toggledOn[b];
-        if (toggledOn[b]) since[b] = now;
-      } else {
-        if (!isActive(b, now)) since[b] = now;
-        held[b] = true;
+static void updateEffects(uint32_t on, uint32_t now) {
+  for (int k = 0; k < NUM_EFFECTS; k++) {
+    const Effect& e = FX[k];
+    bool cond = evalCond(e, on);
+    if (e.kind == 1) {
+      if (cond && !fxPrev[k]) {
+        if (!fxEverOn[k] || now - fxOffSince[k] >= e.minOffMs) { fxActive[k] = true; fxSince[k] = now; }
+        fxEverOn[k] = true;
       }
-    } else if (!BTN[b].toggle && held[b]) {        // released
-      held[b] = false; lastRelease[b] = now; everReleased[b] = true;
+      if (!cond && fxPrev[k]) fxOffSince[k] = now;
+      if (fxActive[k] && e.cancel && !cond) fxActive[k] = false;
+      if (fxActive[k] && now - fxSince[k] >= e.totalMs) fxActive[k] = false;
+    } else {
+      if (cond && !fxPrev[k]) fxSince[k] = now;
+      fxActive[k] = cond;
     }
+    fxPrev[k] = cond;
   }
 }
 
-static CRGB renderPixel(int btn, int step, int i, float u, float v, float o, int side, float t) {
-  switch (btn) {
+static CRGB renderPixel(int fx, int step, int i, float u, float v, float o, int side, float t) {
+  switch (fx) {
 ${dispatch}
   }
   return CRGB::Black;
@@ -195,27 +251,29 @@ ${sideIds.map((s, k) => outs.map((o) => `  FastLED.addLeds<LED_TYPE, ${pinOf(o, 
   FastLED.setMaxPowerInVoltsAndMilliamps(5, MAX_MILLIAMPS);
   FastLED.setBrightness(255);
   FastLED.clear(true);
-  for (int b = 0; b < NUM_BUTTONS; b++) pinMode(BTN[b].pin, INPUT_PULLUP);
+  for (int k = 0; k < NUM_INPUTS; k++) pinMode(IN[k].pin, INPUT_PULLUP);
 }
 
 void loop() {
   static uint32_t lastFrame = 0;
   uint32_t now = millis();
-  readButtons(now);
+  debounceInputs(now);
   if (now - lastFrame < FRAME_MS) return;
   lastFrame = now;
 
-  // work out which step each active button is on
-  bool act[NUM_BUTTONS];
-  int curStep[NUM_BUTTONS];
-  float curT[NUM_BUTTONS];
-  for (int b = 0; b < NUM_BUTTONS; b++) {
-    act[b] = isActive(b, now) && BTN[b].numSteps > 0;
+  updateEffects(updateInputs(now), now);
+
+  // work out which step each active effect is on
+  bool act[NUM_EFFECTS];
+  int curStep[NUM_EFFECTS];
+  float curT[NUM_EFFECTS];
+  for (int b = 0; b < NUM_EFFECTS; b++) {
+    act[b] = fxActive[b] && FX[b].numSteps > 0;
     if (!act[b]) continue;
-    uint32_t el = now - since[b];
-    uint32_t cyc = BTN[b].repeat ? el % BTN[b].totalMs : (el < BTN[b].totalMs - 1 ? el : BTN[b].totalMs - 1);
+    uint32_t el = now - fxSince[b];
+    uint32_t cyc = FX[b].repeat ? el % FX[b].totalMs : (el < FX[b].totalMs - 1 ? el : FX[b].totalMs - 1);
     int k = 0; uint32_t start = 0;
-    while (k < BTN[b].numSteps - 1 && cyc >= start + BTN[b].stepMs[k]) { start += BTN[b].stepMs[k]; k++; }
+    while (k < FX[b].numSteps - 1 && cyc >= start + FX[b].stepMs[k]) { start += FX[b].stepMs[k]; k++; }
     curStep[b] = k;
     curT[b] = (cyc - start) / 1000.0f;
   }
@@ -226,10 +284,10 @@ void loop() {
       uint8_t qu = side ? 255 - LED_U[i] : LED_U[i];
       float u = qu / 255.0f, v = LED_V[i] / 255.0f, o = (255 - LED_U[i]) / 255.0f;
       CRGB c = CRGB::Black;
-      for (int b = NUM_BUTTONS - 1; b >= 0; b--) {      // lowest priority first
-        if (!act[b] || !(BTN[b].sides & (1 << side))) continue;
+      for (int b = NUM_EFFECTS - 1; b >= 0; b--) {      // lowest priority first
+        if (!act[b] || !(FX[b].sides & (1 << side))) continue;
         CRGB x = renderPixel(b, curStep[b], i, u, v, o, side, curT[b]);
-        if (!BTN[b].overlay || x.r || x.g || x.b) c = x;
+        if (!FX[b].overlay || x.r || x.g || x.b) c = x;
       }
       leds[s][i] = c;
     }

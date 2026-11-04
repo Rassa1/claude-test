@@ -1,39 +1,66 @@
 import { defaultMatrix, computeLayout, applyShape, drawLeds, viewTransform, pitchMm } from './matrix.js';
-import { ANIMS, PARAMS, DIRS, defaultParams, defaultDuration, compiled } from './animations.js';
+import { ANIMS, PARAMS, DIRS, defaultParams, defaultDuration } from './animations.js';
 import { parseDescription } from './parser.js';
 import { compileCustom } from './custom.js';
 import { generateSketch } from './codegen.js';
-import { buildScene, renderScene, newInputState, press, release, isActive, totalMs, stepAt } from './engine.js';
+import { buildScene, renderScene, newInputState, newEffectState, engineStep, totalMs } from './engine.js';
 import { interpret, getSample } from './ai.js';
 import { pinUsage, pinOptions, pinProblems, MAX_LED_OUTPUTS } from './pins.js';
 import { outColor } from './matrix.js';
 
 const $ = (s) => document.querySelector(s);
-const STORE = 'taillight-studio-v2';
+const STORE = 'taillight-studio-v3';
 const SAFE_PINS = [13, 14, 27, 26, 25, 33, 32, 4, 16, 17, 19, 21, 22, 23];
 
 // ---------------------------------------------------------------- state
 let uid = 1;
-function mkBtn(name, mode, side, layer, repeat, pin, prompt, extra = {}) {
-  return { id: 'b' + Date.now().toString(36) + uid++, name, mode, side, layer, repeat, pin, releaseMs: 0, prompt, steps: parseDescription(prompt), ...extra };
+const newId = (p) => p + Date.now().toString(36) + (uid++);
+function mkInput(name, pin, type = 'level', holdMs = 0, simPulse = false) {
+  return { id: newId('i'), name, pin, type, holdMs, simPulse };
 }
-function defaultButtons() {
-  return [
-    mkBtn('Hazards', 'toggle', 'both', 'overlay', true, 13, 'amber sequential sweep outward, 3 times'),
-    mkBtn('Left turn', 'toggle', 'left', 'overlay', true, 14, 'amber sequential sweep outward, 3 times'),
-    mkBtn('Right turn', 'toggle', 'right', 'overlay', true, 27, 'amber sequential sweep outward, 3 times'),
-    mkBtn('Brake', 'momentary', 'both', 'replace', false, 26, 'brake: flash red 4 times fast'),
-    mkBtn('Running', 'toggle', 'both', 'replace', true, 25, 'dim red tail light'),
-  ];
+function mkFx(name, side, layer, repeat, prompt, trigger) {
+  return { id: newId('e'), name, side, layer, repeat, prompt, steps: parseDescription(prompt), trigger: { kind: 'while', match: 'all', minOffMs: 0, cancel: false, conds: {}, ...trigger } };
+}
+function defaultModel() {
+  const run = mkInput('Running lights', 25), brake = mkInput('Brake', 26);
+  const L = mkInput('Left blinker', 14, 'level', 800, true), R = mkInput('Right blinker', 27, 'level', 800, true);
+  const sweep = 'amber sequential sweep outward, 3 times';
+  return {
+    inputs: [run, brake, L, R],
+    effects: [
+      mkFx('Hazards', 'both', 'overlay', true, sweep, { conds: { [L.id]: 'on', [R.id]: 'on' } }),
+      mkFx('Left turn', 'left', 'overlay', true, sweep, { conds: { [L.id]: 'on', [R.id]: 'off' } }),
+      mkFx('Right turn', 'right', 'overlay', true, sweep, { conds: { [R.id]: 'on', [L.id]: 'off' } }),
+      mkFx('Brake', 'both', 'replace', false, 'brake: flash red 4 times fast', { conds: { [brake.id]: 'on' } }),
+      mkFx('Startup', 'both', 'replace', false, 'red sweep from the center out once then red breathe for 2 seconds',
+        { kind: 'once', minOffMs: 30000, cancel: true, conds: { [run.id]: 'on' } }),
+      mkFx('Running', 'both', 'replace', true, 'dim red tail light', { conds: { [run.id]: 'on' } }),
+    ],
+  };
+}
+// older saves had "buttons" (one pin each) – turn each into an input + an effect
+function migrateButtons(buttons) {
+  const inputs = [], effects = [];
+  for (const b of buttons) {
+    const inp = mkInput(b.name, b.pin, b.mode === 'toggle' ? 'toggle' : 'level', b.releaseMs || 0);
+    inputs.push(inp);
+    effects.push({ id: newId('e'), name: b.name, side: b.side, layer: b.layer, repeat: b.repeat, prompt: b.prompt, steps: b.steps,
+      trigger: { kind: 'while', match: 'all', minOffMs: 0, cancel: false, conds: { [inp.id]: 'on' } } });
+  }
+  return { inputs, effects };
 }
 function load() {
-  try {
-    const s = JSON.parse(localStorage.getItem(STORE));
-    if (s && s.matrix && Array.isArray(s.buttons)) return s;
-  } catch {}
+  for (const key of [STORE, 'taillight-studio-v2']) {
+    try {
+      const s = JSON.parse(localStorage.getItem(key));
+      if (!s || !s.matrix) continue;
+      if (Array.isArray(s.effects) && Array.isArray(s.inputs)) return s;
+      if (Array.isArray(s.buttons)) { Object.assign(s, migrateButtons(s.buttons)); delete s.buttons; return s; }
+    } catch {}
+  }
   return null;
 }
-let state = load() || { matrix: defaultMatrix(), buttons: defaultButtons(), sel: 0 };
+let state = load() || { matrix: defaultMatrix(), ...defaultModel(), sel: 0 };
 state.matrix.lights ??= 'both';
 state.matrix.outputs ??= [{ pinL: state.matrix.dataPin ?? 5, pinR: state.matrix.dataPinR ?? 18 }];
 state.matrix.rows.forEach((r) => { r.out ??= 0; if (r.out >= state.matrix.outputs.length) r.out = 0; });
@@ -138,7 +165,7 @@ $('#showWiring').onchange = renderBuild;
 // data lines (outputs)
 function renderOutputs() {
   const m = state.matrix, root = $('#outputs');
-  const usage = pinUsage(m, state.buttons);
+  const usage = pinUsage(m, state.inputs);
   const both = m.lights === 'both';
   root.innerHTML = '';
   m.outputs.forEach((o, k) => {
@@ -171,12 +198,12 @@ function renderOutputs() {
   });
   const lines = (both ? 2 : 1) * m.outputs.length;
   $('#addOut').disabled = lines + (both ? 2 : 1) > MAX_LED_OUTPUTS;
-  const warn = pinProblems(m, state.buttons);
+  const warn = pinProblems(m, state.inputs);
   if (m.outputs.some((_, k) => !(layout.outInfo[k]?.count))) warn.push('A data line has no rows – give it rows or remove it.');
   $('#buildWarn').innerHTML = warnHtml(warn);
 }
 function freePin(exclude = []) {
-  const used = new Set([...pinUsage(state.matrix, state.buttons).keys(), ...exclude]);
+  const used = new Set([...pinUsage(state.matrix, state.inputs).keys(), ...exclude]);
   return [16, 17, 19, 21, 22, 23, 4, 32, 33, 13, 14, 25, 26, 27, 5, 18].find((p) => !used.has(p)) ?? 4;
 }
 $('#addOut').onclick = () => {
@@ -243,24 +270,39 @@ $('#lights').onchange = (e) => {
   save();
 };
 
-// ---------------------------------------------------------------- buttons & simulator
+// ---------------------------------------------------------------- inputs, effects & simulator
 const sc = $('#simCanvas');
 let simNow = 0, lastTs = performance.now();
-let lastActiveSig = '';
-let inputs = new Map();       // button id -> input state
-const pendingRelease = new Map();
-const inp = (b) => { if (!inputs.has(b.id)) inputs.set(b.id, newInputState()); return inputs.get(b.id); };
-const selBtn = () => state.buttons[state.sel] || state.buttons[0];
+let lastSig = '';
+let simIn = new Map();      // input id -> simulated wire { latched, latchedAt, held, downAt }
+let inStates = [], fxStates = [], onMask = 0;
+let previewFx = null;       // { id, since, until } – shows one effect right after it's generated
+const sim = (k) => {
+  const x = state.inputs[k];
+  if (!simIn.has(x.id)) simIn.set(x.id, { latched: false, latchedAt: 0, held: false, downAt: 0 });
+  return simIn.get(x.id);
+};
+const selFx = () => state.effects[state.sel] || state.effects[0];
 const toHex = (c) => '#' + c.map((x) => Math.round(x).toString(16).padStart(2, '0')).join('');
 const fromHex = (h) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16));
-const btnColor = (b) => {
+const fxColor = (b) => {
   const s = b.steps.find((x) => x.color && x.type !== 'off');
   return s ? toHex(s.color) : (b.steps.some((x) => x.type === 'rainbow' || x.type === 'custom') ? '#c9a2ff' : '#666666');
 };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// engine state follows the model's shape (kept by id so edits don't reset everything)
+let inStateById = new Map(), fxStateById = new Map();
+function syncEngineStates() {
+  inStates = state.inputs.map((x) => { if (!inStateById.has(x.id)) inStateById.set(x.id, newInputState()); return inStateById.get(x.id); });
+  fxStates = state.effects.map((x) => { if (!fxStateById.has(x.id)) fxStateById.set(x.id, newEffectState()); return fxStateById.get(x.id); });
+}
+function powerCycle() {           // what the ESP32 sees after a restart
+  inStateById = new Map(); fxStateById = new Map(); simNow = 0; previewFx = null;
+  syncEngineStates();
+}
+
 function setView(v) {
-  // a single-light build can only show that light
   if (state.matrix.lights !== 'both') v = state.matrix.lights;
   state.view = v;
   scene = buildScene(layout, v);
@@ -272,26 +314,36 @@ function setView(v) {
 }
 document.querySelectorAll('#viewSel button').forEach((b) => (b.onclick = () => setView(b.dataset.view)));
 
-function doPress(b) { press(b, inp(b), simNow); pendingRelease.delete(b.id); }
-function doRelease(b) { release(b, inp(b), simNow); }
+// ---- simulated wires: click = switch on/off, hold = only while held
+function wireDown(k) { const s = sim(k); if (s.held) return; s.held = true; s.downAt = performance.now(); }
+function wireUp(k) {
+  const s = sim(k);
+  if (!s.held) return;
+  s.held = false;
+  if (state.inputs[k].type !== 'toggle' && performance.now() - s.downAt < 300) {
+    s.latched = !s.latched; s.latchedAt = simNow;
+  }
+}
+function rawSignal(k) {
+  const x = state.inputs[k], s = sim(k);
+  if (x.type === 'toggle') return s.held;
+  const pulse = x.simPulse && s.latched ? ((simNow - s.latchedAt) % 700) < 350 : s.latched;
+  return s.held || pulse;
+}
 
-// stage button bar
 function renderBar() {
-  lastActiveSig = '';
+  lastSig = '';
   const bar = $('#btnbar');
   bar.innerHTML = '';
-  state.buttons.forEach((b, k) => {
+  state.inputs.forEach((x, k) => {
     const el = document.createElement('button');
     el.className = 'pbtn';
-    el.dataset.id = b.id;
-    el.style.setProperty('--glow', btnColor(b));
-    el.innerHTML = `${k < 9 ? `<span class="key">${k + 1}</span>` : ''}<span class="dot"></span>${esc(b.name)}<small>${b.mode === 'toggle' ? 'toggle' : 'hold'} · ${b.side === 'both' ? 'both' : b.side}</small>`;
-    el.addEventListener('pointerdown', (e) => { e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch {} doPress(b); });
-    const up = () => doRelease(b);
-    el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
-    el.addEventListener('keydown', (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); doPress(b); } });
-    el.addEventListener('keyup', (e) => { if (e.key === ' ' || e.key === 'Enter') doRelease(b); });
+    el.innerHTML = `${k < 9 ? `<span class="key">${k + 1}</span>` : ''}<span class="dot"></span>${esc(x.name)}<small>GPIO ${x.pin}${x.type === 'toggle' ? ' · push button' : x.simPulse ? ' · flashing' : ''}</small>`;
+    el.addEventListener('pointerdown', (e) => { e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch {} wireDown(k); });
+    el.addEventListener('pointerup', () => wireUp(k));
+    el.addEventListener('pointercancel', () => wireUp(k));
+    el.addEventListener('keydown', (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); wireDown(k); } });
+    el.addEventListener('keyup', (e) => { if (e.key === ' ' || e.key === 'Enter') wireUp(k); });
     bar.appendChild(el);
   });
 }
@@ -299,74 +351,143 @@ const typing = () => /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.ta
 window.addEventListener('keydown', (e) => {
   if (e.repeat || typing() || !$('#tab-animate').classList.contains('active')) return;
   const k = +e.key;
-  if (k >= 1 && k <= 9 && state.buttons[k - 1]) doPress(state.buttons[k - 1]);
+  if (k >= 1 && k <= 9 && state.inputs[k - 1]) wireDown(k - 1);
 });
 window.addEventListener('keyup', (e) => {
   const k = +e.key;
-  if (k >= 1 && k <= 9 && state.buttons[k - 1]) doRelease(state.buttons[k - 1]);
+  if (k >= 1 && k <= 9 && state.inputs[k - 1]) wireUp(k - 1);
 });
-$('#allOff').onclick = () => { inputs = new Map(); pendingRelease.clear(); };
+$('#allOff').onclick = () => { simIn = new Map(); };
+$('#skip30').onclick = () => { simNow += 30000; };
+$('#reboot').onclick = () => powerCycle();
 
-// panel: list of buttons
-function renderList() {
-  const el = $('#btnList');
+// ---- inputs panel
+function inputsChanged(rebuild) {
+  syncEngineStates();
+  if (rebuild) renderInputs();
+  renderBar(); renderFxList(); renderEditor(); renderOutputs(); save();
+}
+function renderInputs() {
+  const root = $('#inList');
+  root.innerHTML = '';
+  const usage = pinUsage(state.matrix, state.inputs);
+  state.inputs.forEach((x, k) => {
+    const d = document.createElement('div');
+    d.className = 'incard';
+    d.innerHTML = `<div class="incard-head"><input type="text" maxlength="30" value="${esc(x.name)}" aria-label="Input name">
+        <button title="Delete input" ${state.inputs.length < 2 ? 'disabled' : ''}>×</button></div>
+      <div class="grid2">
+        <label>ESP32 pin<select data-f="pin">${pinOptions(x.pin, usage, x.name, false)}</select></label>
+        <label>Signal<select data-f="type"><option value="level">Wire (on while powered)</option><option value="toggle">Push button (press = on/off)</option></select></label>
+        <label ${x.type === 'toggle' ? 'hidden' : ''}>Hold after it drops (ms)<input type="number" data-f="holdMs" min="0" max="5000" step="50" value="${x.holdMs | 0}"></label>
+        <label class="chk" ${x.type === 'toggle' ? 'hidden' : ''}><input type="checkbox" data-f="simPulse" ${x.simPulse ? 'checked' : ''}> Flashes like a blinker (sim)</label>
+      </div>`;
+    d.querySelector('select[data-f="type"]').value = x.type;
+    d.querySelector('.incard-head input').oninput = (e) => { x.name = e.target.value || 'Input'; renderBar(); renderEditor(); save(); };
+    d.querySelector('.incard-head button').onclick = () => {
+      if (state.inputs.length < 2) return;
+      state.inputs.splice(k, 1);
+      state.effects.forEach((fx) => delete fx.trigger.conds[x.id]);
+      simIn.delete(x.id);
+      inputsChanged(true);
+    };
+    d.querySelector('[data-f="pin"]').onchange = (e) => { x.pin = +e.target.value; inputsChanged(true); };
+    d.querySelector('[data-f="type"]').onchange = (e) => { x.type = e.target.value; inputsChanged(true); };
+    d.querySelector('[data-f="holdMs"]').oninput = (e) => { x.holdMs = Math.max(0, Math.min(5000, +e.target.value | 0)); save(); };
+    d.querySelector('[data-f="simPulse"]').onchange = (e) => { x.simPulse = e.target.checked; renderBar(); save(); };
+    root.appendChild(d);
+  });
+  $('#addIn').disabled = state.inputs.length >= 16;
+}
+$('#addIn').onclick = () => {
+  const used = pinUsage(state.matrix, state.inputs);
+  state.inputs.push(mkInput('New input', SAFE_PINS.find((p) => !used.has(p)) ?? 15));
+  inputsChanged(true);
+};
+
+// ---- effects list
+function renderFxList() {
+  const el = $('#fxList');
   el.innerHTML = '';
-  state.buttons.forEach((b, k) => {
+  state.effects.forEach((b, k) => {
     const d = document.createElement('div');
     d.className = 'bitem' + (k === state.sel ? ' sel' : '');
-    d.innerHTML = `<span class="sw" style="background:${btnColor(b)}"></span>
-      <div><div>${esc(b.name)}</div><div class="meta">${b.mode === 'toggle' ? 'Toggle' : 'Momentary'} · ${b.side === 'both' ? 'both lights' : b.side + ' light'} · GPIO ${b.pin}</div></div>
+    d.dataset.k = k;
+    d.innerHTML = `<span class="sw" style="background:${fxColor(b)}"></span>
+      <div><div>${esc(b.name)} <span class="live" title="Running now"></span></div><div class="meta">${esc(triggerSummary(b))}</div></div>
       <span><button data-a="up" title="Higher priority">↑</button><button data-a="down" title="Lower priority">↓</button></span>
-      <button data-a="del" title="Delete button">×</button>`;
+      <button data-a="del" title="Delete effect">×</button>`;
     d.onclick = (e) => {
-      const a = e.target.dataset?.a;
-      if (a === 'up' && k > 0) { [state.buttons[k - 1], state.buttons[k]] = [state.buttons[k], state.buttons[k - 1]]; if (state.sel === k) state.sel--; else if (state.sel === k - 1) state.sel++; }
-      else if (a === 'down' && k < state.buttons.length - 1) { [state.buttons[k + 1], state.buttons[k]] = [state.buttons[k], state.buttons[k + 1]]; if (state.sel === k) state.sel++; else if (state.sel === k + 1) state.sel--; }
-      else if (a === 'del') { if (state.buttons.length > 1) { state.buttons.splice(k, 1); state.sel = Math.min(state.sel, state.buttons.length - 1); } }
+      const a = e.target.dataset?.a, E = state.effects;
+      if (a === 'up' && k > 0) { [E[k - 1], E[k]] = [E[k], E[k - 1]]; if (state.sel === k) state.sel--; else if (state.sel === k - 1) state.sel++; }
+      else if (a === 'down' && k < E.length - 1) { [E[k + 1], E[k]] = [E[k], E[k + 1]]; if (state.sel === k) state.sel++; else if (state.sel === k + 1) state.sel--; }
+      else if (a === 'del') { if (E.length > 1) { E.splice(k, 1); state.sel = Math.min(state.sel, E.length - 1); } }
       else state.sel = k;
-      buttonsChanged(true);
+      fxChanged(true);
     };
     el.appendChild(d);
   });
+  lastSig = '';
 }
-$('#addBtn').onclick = () => {
-  const used = pinUsage(state.matrix, state.buttons);
-  const pin = SAFE_PINS.find((p) => !used.has(p)) ?? 15;
-  state.buttons.unshift(mkBtn('New button', 'toggle', 'both', 'overlay', true, pin, 'red knight rider scanner'));
+function triggerSummary(fx) {
+  const t = fx.trigger;
+  const parts = state.inputs.filter((x) => t.conds[x.id] === 'on' || t.conds[x.id] === 'off')
+    .map((x) => (t.conds[x.id] === 'off' ? 'not ' : '') + x.name);
+  const cond = parts.length ? parts.join(t.match === 'any' ? ' or ' : ' + ') : 'no trigger set';
+  const where = fx.side === 'both' ? '' : ` · ${fx.side} only`;
+  if (t.kind === 'once') return `Once when ${cond}${t.minOffMs ? ` (if off ${Math.round(t.minOffMs / 1000)}s+)` : ''}${where}`;
+  return `While ${cond}${where}`;
+}
+$('#addFx').onclick = () => {
+  state.effects.unshift(mkFx('New effect', 'both', 'overlay', true, 'red knight rider scanner', {}));
   state.sel = 0;
-  buttonsChanged(true);
+  fxChanged(true);
 };
-function buttonsChanged(rebuildEditor) {
-  renderList(); renderBar();
+function fxChanged(rebuildEditor) {
+  syncEngineStates();
+  renderFxList();
   if (rebuildEditor) renderEditor();
   save();
 }
 
-// panel: editor for the selected button
+// ---- effect editor
 let aiCtl = null;
 function renderEditor() {
-  const b = selBtn();
+  const b = selFx();
   const root = $('#btnEditor');
   if (!b) { root.innerHTML = ''; return; }
+  const t = b.trigger;
   root.innerHTML = `<div class="editor-card">
-    <h3>Button settings</h3>
+    <h3>Effect</h3>
     <div class="grid2">
       <label class="full2">Name<input type="text" id="bName" maxlength="40" value="${esc(b.name)}"></label>
-      <label>ESP32 pin that triggers it<select id="bPin">${pinOptions(b.pin, pinUsage(state.matrix, state.buttons), b.name, false)}</select></label>
-      <label>Mode<select id="bMode"><option value="toggle">Toggle (on/off)</option><option value="momentary">Momentary (hold)</option></select></label>
       <label>Lights<select id="bSide"><option value="both">Both</option><option value="left">Left only</option><option value="right">Right only</option></select></label>
-      <label>When on<select id="bLayer"><option value="replace">Replace lower layers</option><option value="overlay">Lay lit LEDs on top</option></select></label>
-      <label>Playback<select id="bRepeat"><option value="1">Loop while on</option><option value="0">Play once, hold end</option></select></label>
-      <label id="bRelWrap">Stay on after release (ms)<input type="number" id="bRel" min="0" max="5000" step="50" value="${b.releaseMs || 0}"></label>
+      <label>When on<select id="bLayer"><option value="replace">Replace effects below</option><option value="overlay">Lay lit LEDs on top</option></select></label>
     </div>
 
-    <div class="pinwarn">${warnHtml(pinProblems(state.matrix, state.buttons).filter((w) => w.includes('GPIO ' + b.pin + ' ')))}</div>
+    <h3>Trigger</h3>
+    <div class="grid2">
+      <label class="full2">Runs<select id="tKind"><option value="while">While the condition is true</option><option value="once">Once, when the condition turns on</option></select></label>
+    </div>
+    <div class="condlabel">Condition <span class="muted small">click an input: ignore → ON → OFF</span></div>
+    <div class="conds" id="conds">${state.inputs.map((x) => {
+      const c = t.conds[x.id] || 'ignore';
+      return `<button data-id="${x.id}" class="cond ${c}">${c === 'on' ? '● ' : c === 'off' ? '○ not ' : ''}${esc(x.name)}</button>`;
+    }).join('')}</div>
+    <div class="grid2 sm-top">
+      <label>Inputs must<select id="tMatch"><option value="all">All match</option><option value="any">Any one matches</option></select></label>
+      <label id="wRepeat">Playback<select id="bRepeat"><option value="1">Loop while on</option><option value="0">Play once, hold end</option></select></label>
+      <label id="wMinOff">Only if it was off for at least (s)<input type="number" id="tMinOff" min="0" max="86400" step="1" value="${Math.round((t.minOffMs || 0) / 1000)}"></label>
+      <label id="wCancel" class="chk"><input type="checkbox" id="tCancel" ${t.cancel ? 'checked' : ''}> Stop early if it turns off</label>
+    </div>
+    <p class="muted small-p sm-top" id="tExplain"></p>
 
     <h3>Describe the animation <span class="badge" id="aiBadge">checking AI…</span></h3>
     <textarea id="bPrompt" rows="3" placeholder="e.g. red light that fills from the inside out, then pulses twice">${esc(b.prompt || '')}</textarea>
     <div class="ai-row">
       <button class="primary" id="bGen">Generate ✦</button>
       <button class="ghost" id="bStop" hidden>Stop</button>
+      <button class="ghost" id="bPreview" title="Play this effect now, ignoring its trigger">Preview</button>
       <span class="muted small">Ctrl/⌘+Enter</span>
     </div>
     <div class="ai-status" id="aiStatus"></div>
@@ -375,23 +496,37 @@ function renderEditor() {
     <div id="steps"></div>
     <button id="addStep" class="ghost wide sm-top">+ Add step</button>
   </div>`;
-  $('#bMode').value = b.mode; $('#bSide').value = b.side; $('#bLayer').value = b.layer; $('#bRepeat').value = b.repeat ? '1' : '0';
-  $('#bRelWrap').hidden = b.mode === 'toggle';
-  $('#bName').oninput = (e) => { b.name = e.target.value || 'Button'; renderList(); renderBar(); save(); };
-  $('#bPin').onchange = (e) => { b.pin = +e.target.value; renderList(); renderEditor(); renderOutputs(); save(); };
-  $('#bMode').onchange = (e) => { b.mode = e.target.value; inputs.delete(b.id); $('#bRelWrap').hidden = b.mode === 'toggle'; buttonsChanged(); };
-  $('#bSide').onchange = (e) => { b.side = e.target.value; buttonsChanged(); };
+  $('#bSide').value = b.side; $('#bLayer').value = b.layer; $('#bRepeat').value = b.repeat ? '1' : '0';
+  $('#tKind').value = t.kind; $('#tMatch').value = t.match;
+  const showKind = () => {
+    $('#wRepeat').hidden = t.kind === 'once';
+    $('#wMinOff').hidden = $('#wCancel').hidden = t.kind !== 'once';
+    $('#tExplain').textContent = explain(b);
+  };
+  showKind();
+  $('#bName').oninput = (e) => { b.name = e.target.value || 'Effect'; renderFxList(); save(); };
+  $('#bSide').onchange = (e) => { b.side = e.target.value; renderFxList(); save(); };
   $('#bLayer').onchange = (e) => { b.layer = e.target.value; save(); };
   $('#bRepeat').onchange = (e) => { b.repeat = e.target.value === '1'; save(); };
-  $('#bRel').oninput = (e) => { b.releaseMs = Math.max(0, Math.min(5000, +e.target.value | 0)); save(); };
+  $('#tKind').onchange = (e) => { t.kind = e.target.value; showKind(); renderFxList(); save(); };
+  $('#tMatch').onchange = (e) => { t.match = e.target.value; showKind(); renderFxList(); save(); };
+  $('#tMinOff').oninput = (e) => { t.minOffMs = Math.max(0, Math.min(86400, +e.target.value || 0)) * 1000; showKind(); renderFxList(); save(); };
+  $('#tCancel').onchange = (e) => { t.cancel = e.target.checked; showKind(); save(); };
+  document.querySelectorAll('#conds .cond').forEach((el) => (el.onclick = () => {
+    const id = el.dataset.id, cur = t.conds[id] || 'ignore';
+    const next = { ignore: 'on', on: 'off', off: 'ignore' }[cur];
+    if (next === 'ignore') delete t.conds[id]; else t.conds[id] = next;
+    renderEditor(); renderFxList(); save();
+  }));
   $('#bPrompt').oninput = (e) => { b.prompt = e.target.value; save(); };
   $('#bPrompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('#bGen').click(); });
   $('#bGen').onclick = () => generate(b);
   $('#bStop').onclick = () => aiCtl?.abort();
+  $('#bPreview').onclick = () => preview(b);
   $('#addStep').onclick = () => {
     const s = { type: 'solid', ...defaultParams('solid') };
     s.duration = defaultDuration(s);
-    b.steps.push(s); renderSteps(b); buttonsChanged();
+    b.steps.push(s); renderSteps(b); fxChanged();
   };
   getSample().then((s) => {
     const el = $('#aiBadge');
@@ -401,6 +536,14 @@ function renderEditor() {
     el.title = s ? 'Claude reads your description' : 'AI works when this page is opened on claude.ai. Using the built-in keyword parser.';
   });
   renderSteps(b);
+}
+function explain(fx) {
+  const t = fx.trigger, s = triggerSummary(fx);
+  if (!Object.keys(t.conds).length) return 'Pick at least one input above, or this effect never runs.';
+  if (t.kind === 'once') {
+    return `Plays its steps one time when the condition turns on${t.minOffMs ? `, but only if it had been off for ${Math.round(t.minOffMs / 1000)} s or more (or since the ESP32 powered up)` : ''}${t.cancel ? '. Stops early if the condition turns off' : ''}. Use "+30 s" and "Power-cycle ESP32" above the lights to test it.`;
+  }
+  return `${s}. ${fx.repeat ? 'Loops' : 'Plays once and holds the last frame'} until the condition turns off.`;
 }
 
 async function generate(b) {
@@ -413,18 +556,15 @@ async function generate(b) {
     const ctx = {
       leds: layout.leds.length, rows: state.matrix.rows.length,
       widthCm: ((layout.maxX - layout.minX) / 10).toFixed(1), heightCm: ((layout.maxY - layout.minY) / 10).toFixed(1),
-      name: b.name, side: b.side, repeat: b.repeat,
+      name: b.name, side: b.side, repeat: b.trigger.kind === 'while' && b.repeat,
     };
     const res = await interpret(text, ctx, aiCtl.signal);
-    if (selBtn() !== b) return;
+    if (selFx() !== b) return;
     b.steps = res.steps;
-    if (res.repeat !== null) b.repeat = res.repeat;
-    if (res.via === 'ai') setStatus('✦ ' + (res.summary || 'Done.'), 'ai');
-    else setStatus(res.note, 'warn');
+    if (res.repeat !== null && b.trigger.kind === 'while') b.repeat = res.repeat;
     renderEditor();
-    if ($('#aiStatus')) $('#aiStatus').textContent = res.via === 'ai' ? '✦ ' + (res.summary || 'Done.') : res.note;
-    if ($('#aiStatus')) $('#aiStatus').className = 'ai-status ' + (res.via === 'ai' ? 'ai' : 'warn');
-    buttonsChanged();
+    setStatus(res.via === 'ai' ? '✦ ' + (res.summary || 'Done.') : res.note, res.via === 'ai' ? 'ai' : 'warn');
+    fxChanged();
     preview(b);
   } catch (e) {
     if (e?.code !== 'cancelled') setStatus('Something went wrong. Try again.', 'warn');
@@ -435,15 +575,10 @@ async function generate(b) {
 }
 function setStatus(msg, cls = '') { const el = $('#aiStatus'); if (el) { el.textContent = msg; el.className = 'ai-status ' + cls; } }
 
-// turn a button on so you can see what was just generated
+// play one effect now, regardless of its trigger
 function preview(b) {
-  const st = inp(b);
-  if (b.mode === 'toggle') { if (!st.on) press(b, st, simNow); else st.since = simNow; }
-  else {
-    st.held = false; st.lastRelease = -1e12;
-    press(b, st, simNow);
-    pendingRelease.set(b.id, simNow + Math.min(totalMs(b) * (b.repeat ? 2 : 1) + 600, 15000));
-  }
+  const loops = b.trigger.kind === 'while' && b.repeat;
+  previewFx = { id: b.id, since: simNow, until: simNow + Math.min(totalMs(b) * (loops ? 2 : 1) + (loops ? 0 : 800), 15000) };
 }
 
 function renderSteps(b) {
@@ -464,14 +599,14 @@ function renderSteps(b) {
       Object.assign(s, { type: e.target.value, ...defaultParams(e.target.value) });
       if (keep.color && e.target.value !== 'off') s.color = keep.color;
       s.duration = defaultDuration(s);
-      renderSteps(b); buttonsChanged();
+      renderSteps(b); fxChanged();
     };
     el.querySelectorAll('.step-head button').forEach((x) => (x.onclick = () => {
       const a = x.dataset.a;
       if (a === 'del' && b.steps.length > 1) b.steps.splice(k, 1);
       if (a === 'dup') b.steps.splice(k + 1, 0, structuredClone(s));
       if (a === 'up' && k > 0) [b.steps[k - 1], b.steps[k]] = [b.steps[k], b.steps[k - 1]];
-      renderSteps(b); buttonsChanged();
+      renderSteps(b); fxChanged();
     }));
 
     const P = el.querySelector('.params');
@@ -487,7 +622,7 @@ function renderSteps(b) {
       if (pd.type === 'color') {
         add(`${pd.label}<div class="colorrow"><input type="color" value="${toHex(s[key])}"><span class="val">${toHex(s[key])}</span></div>`, (l) => {
           const i = l.querySelector('input');
-          i.oninput = () => { s[key] = fromHex(i.value); l.querySelector('.val').textContent = i.value; renderList(); renderBar(); save(); };
+          i.oninput = () => { s[key] = fromHex(i.value); l.querySelector('.val').textContent = i.value; renderFxList(); save(); };
         });
       } else if (pd.type === 'range') {
         add(`${pd.label} <span class="val">${(+s[key]).toFixed(2)}</span><input type="range" min="${pd.min}" max="${pd.max}" step="${pd.step}" value="${s[key]}">`, (l) => {
@@ -514,32 +649,33 @@ function renderSteps(b) {
   });
 }
 
-// animation loop
+// ---------------------------------------------------------------- animation loop
 function tick(ts) {
   const dt = Math.min(100, ts - lastTs);
   lastTs = ts;
   simNow += dt * +$('#simSpeed').value;
-  for (const [id, at] of pendingRelease) {
-    if (simNow >= at) {
-      const b = state.buttons.find((x) => x.id === id);
-      if (b) release(b, inp(b), simNow);
-      pendingRelease.delete(id);
-    }
-  }
+  if (inStates.length !== state.inputs.length || fxStates.length !== state.effects.length) syncEngineStates();
+  const raws = state.inputs.map((_, k) => rawSignal(k));
+  onMask = engineStep({ inputs: state.inputs, effects: state.effects }, inStates, fxStates, raws, simNow);
+  if (previewFx && simNow >= previewFx.until) previewFx = null;
+
   if ($('#tab-animate').classList.contains('active')) {
-    const states = state.buttons.map(inp);
-    const { colors, act } = renderScene(scene, state.buttons, states, simNow);
+    const shown = fxStates.map((st, k) => (previewFx && state.effects[k].id === previewFx.id ? { active: true, since: previewFx.since } : st));
+    const { colors, act } = renderScene(scene, state.effects, shown, simNow);
     drawLeds(sc, scene, colors, { pad: 36 });
-    const sig = act.map((a) => (a ? 1 : 0)).join('');
-    if (sig !== lastActiveSig) {
-      lastActiveSig = sig;
-      document.querySelectorAll('.pbtn').forEach((el, k) => el.classList.toggle('on', !!act[k]));
+    const sig = onMask + ':' + act.map((a) => (a ? 1 : 0)).join('');
+    if (sig !== lastSig) {
+      lastSig = sig;
+      document.querySelectorAll('.pbtn').forEach((el, k) => el.classList.toggle('on', !!(onMask & (1 << k))));
+      document.querySelectorAll('#fxList .bitem').forEach((el) => el.classList.toggle('running', !!act[+el.dataset.k]));
     }
-    const b = selBtn(), k = state.sel;
+    const b = selFx(), k = state.sel;
     document.querySelectorAll('#steps .step').forEach((el) => el.classList.toggle('active', !!act[k] && act[k].step === b.steps[+el.dataset.k]));
+    $('#simClock').textContent = fmtClock(simNow);
   }
   requestAnimationFrame(tick);
 }
+const fmtClock = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 // ---------------------------------------------------------------- code
 let sketch = '';
@@ -557,14 +693,14 @@ function highlight(src) {
     (m, c, p, k, n) => c ? `<span class="c">${c}</span>` : p ? `<span class="p">${p}</span>` : k ? `<span class="k">${k}</span>` : `<span class="n">${n}</span>`);
 }
 function renderCode() {
-  sketch = generateSketch(state.matrix, layout, state.buttons);
+  sketch = generateSketch(state.matrix, layout, { inputs: state.inputs, effects: state.effects });
   $('#code').innerHTML = highlight(sketch);
   const n = layout.leds.length;
   const sides = state.matrix.lights === 'both' ? 2 : 1;
-  $('#codeInfo').textContent = `taillight.ino · ${n} LEDs × ${sides} light${sides > 1 ? 's' : ''} · ${state.buttons.length} buttons · ${sketch.split('\n').length} lines`;
-  const usage = [...pinUsage(state.matrix, state.buttons)].sort((a, b) => a[0] - b[0]);
+  $('#codeInfo').textContent = `taillight.ino · ${n} LEDs × ${sides} light${sides > 1 ? 's' : ''} · ${state.inputs.length} inputs · ${state.effects.length} effects · ${sketch.split('\n').length} lines`;
+  const usage = [...pinUsage(state.matrix, state.inputs)].sort((a, b) => a[0] - b[0]);
   $('#pinTable').innerHTML = usage.map(([p, who]) => `<span class="p">GPIO ${p}</span><span class="w">${who.map((w) => String(w).replace(/[&<>]/g, '')).join(', ')}</span>`).join('');
-  $('#codeWarn').innerHTML = warnHtml(pinProblems(state.matrix, state.buttons));
+  $('#codeWarn').innerHTML = warnHtml(pinProblems(state.matrix, state.inputs));
   const amps = (n * sides * 60) / 1000;
   $('#powerInfo').textContent = `Worst case (all white): ${amps.toFixed(1)} A. Code caps it at ${(state.matrix.maxMilliamps / 1000).toFixed(1)} A, so size your 5V supply for at least that.`;
 }
@@ -593,13 +729,14 @@ $('#download').onclick = async () => {
 
 // ---------------------------------------------------------------- boot
 window.addEventListener('resize', () => { if ($('#tab-build').classList.contains('active')) renderBuild(); });
-// start with the running lights on
-const running = state.buttons.find((b) => /running|tail/i.test(b.name) && b.mode === 'toggle');
-if (running) press(running, inp(running), 0);
+// start with the running-light power on
+const running = state.inputs.findIndex((x) => /running|tail|park/i.test(x.name) && x.type !== 'toggle');
+if (running >= 0) sim(running).latched = true;
 syncBuildInputs();
 syncHwInputs();
 setView(state.view);
-renderList();
+renderInputs();
+renderFxList();
 renderBar();
 renderEditor();
 renderBuild();
