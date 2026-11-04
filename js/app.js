@@ -7,6 +7,17 @@ import { buildScene, renderScene, newInputState, newEffectState, engineStep, tot
 import { interpret, getSample } from './ai.js';
 import { pinUsage, pinOptions, pinProblems, MAX_LED_OUTPUTS } from './pins.js';
 import { outColor } from './matrix.js';
+import { textColumns, resolveFont } from './font.js';
+import { lightCols } from './engine.js';
+
+// seconds for a text step's message to scroll fully past once
+function textPass(s) {
+  const W = lightCols(layout) + 1;
+  const TW = s.span === 'across' && state.matrix.lights === 'both' ? 2 * W + 2 : W;
+  const cols = textColumns(s.text, resolveFont(s.font, state.matrix.rows.length)).length;
+  return +((TW + cols) / s.speed).toFixed(2);
+}
+const fitText = (s, atLeast) => { if (s.type === 'text') s.duration = atLeast ? Math.max(s.duration, textPass(s)) : textPass(s); };
 
 const $ = (s) => document.querySelector(s);
 const STORE = 'taillight-studio-v3';
@@ -66,7 +77,7 @@ state.matrix.outputs ??= [{ pinL: state.matrix.dataPin ?? 5, pinR: state.matrix.
 state.matrix.rows.forEach((r) => { r.out ??= 0; if (r.out >= state.matrix.outputs.length) r.out = 0; });
 state.view ??= state.matrix.lights;
 let layout = computeLayout(state.matrix);
-let scene = buildScene(layout, state.view);
+let scene = buildScene(layout, state.view, state.matrix.lights === 'both');
 let selRow = -1;
 
 let saveT;
@@ -76,7 +87,7 @@ function save() {
 }
 function matrixChanged() {
   layout = computeLayout(state.matrix);
-  scene = buildScene(layout, state.view);
+  scene = buildScene(layout, state.view, state.matrix.lights === 'both');
   renderBuild();
   renderOutputs();
   save();
@@ -305,7 +316,7 @@ function powerCycle() {           // what the ESP32 sees after a restart
 function setView(v) {
   if (state.matrix.lights !== 'both') v = state.matrix.lights;
   state.view = v;
-  scene = buildScene(layout, v);
+  scene = buildScene(layout, v, state.matrix.lights === 'both');
   document.querySelectorAll('#viewSel button').forEach((b) => {
     b.classList.toggle('on', b.dataset.view === v);
     b.disabled = state.matrix.lights !== 'both' && b.dataset.view !== state.matrix.lights;
@@ -556,11 +567,13 @@ async function generate(b) {
     const ctx = {
       leds: layout.leds.length, rows: state.matrix.rows.length,
       widthCm: ((layout.maxX - layout.minX) / 10).toFixed(1), heightCm: ((layout.maxY - layout.minY) / 10).toFixed(1),
+      cols: Math.round((layout.maxX - layout.minX) / layout.pitch) + 1,
       name: b.name, side: b.side, repeat: b.trigger.kind === 'while' && b.repeat,
     };
     const res = await interpret(text, ctx, aiCtl.signal);
     if (selFx() !== b) return;
     b.steps = res.steps;
+    b.steps.forEach((x) => fitText(x, res.via === 'ai'));
     if (res.repeat !== null && b.trigger.kind === 'while') b.repeat = res.repeat;
     renderEditor();
     setStatus(res.via === 'ai' ? '✦ ' + (res.summary || 'Done.') : res.note, res.via === 'ai' ? 'ai' : 'warn');
@@ -599,6 +612,7 @@ function renderSteps(b) {
       Object.assign(s, { type: e.target.value, ...defaultParams(e.target.value) });
       if (keep.color && e.target.value !== 'off') s.color = keep.color;
       s.duration = defaultDuration(s);
+      fitText(s);
       renderSteps(b); fxChanged();
     };
     el.querySelectorAll('.step-head button').forEach((x) => (x.onclick = () => {
@@ -610,8 +624,9 @@ function renderSteps(b) {
     }));
 
     const P = el.querySelector('.params');
+    const refit = () => { if (s.type !== 'text') return; fitText(s); const li = P.querySelector('input[data-len]'); if (li) li.value = s.duration; };
     const add = (html, bind, cls) => { const l = document.createElement('label'); if (cls) l.className = cls; l.innerHTML = html; P.appendChild(l); bind(l); };
-    add(`Length (s) <input type="number" min="0.05" step="0.05" value="${s.duration}">`, (l) => {
+    add(`Length (s) <input type="number" data-len min="0.05" step="0.05" value="${s.duration}">`, (l) => {
       l.querySelector('input').oninput = (e) => { s.duration = Math.max(0.05, +e.target.value || 0.05); save(); };
     });
     add(`Brightness <span class="val">${Math.round(s.brightness * 100)}%</span><input type="range" min="0.02" max="1" step="0.01" value="${s.brightness}">`, (l) => {
@@ -626,7 +641,7 @@ function renderSteps(b) {
         });
       } else if (pd.type === 'range') {
         add(`${pd.label} <span class="val">${(+s[key]).toFixed(2)}</span><input type="range" min="${pd.min}" max="${pd.max}" step="${pd.step}" value="${s[key]}">`, (l) => {
-          l.querySelector('input').oninput = (e) => { s[key] = +e.target.value; l.querySelector('.val').textContent = s[key].toFixed(2); save(); };
+          l.querySelector('input').oninput = (e) => { s[key] = +e.target.value; l.querySelector('.val').textContent = s[key].toFixed(2); if (key === 'speed') refit(); save(); };
         });
       } else if (pd.type === 'int') {
         add(`${pd.label}<input type="number" min="${pd.min}" max="${pd.max}" value="${s[key]}">`, (l) => {
@@ -635,6 +650,14 @@ function renderSteps(b) {
       } else if (pd.type === 'dir') {
         add(`${pd.label}<select>${Object.entries(DIRS).map(([id, n]) => `<option value="${id}" ${id === s[key] ? 'selected' : ''}>${n}</option>`).join('')}</select>`, (l) => {
           l.querySelector('select').onchange = (e) => { s[key] = e.target.value; save(); };
+        });
+      } else if (pd.type === 'text') {
+        add(`${pd.label}<input type="text" maxlength="64" value="${esc(s[key] ?? '')}" placeholder="Your message">`, (l) => {
+          l.querySelector('input').oninput = (e) => { s[key] = e.target.value; refit(); save(); };
+        }, 'full');
+      } else if (pd.type === 'select') {
+        add(`${pd.label}<select>${Object.entries(pd.options).map(([id, n]) => `<option value="${id}" ${id === s[key] ? 'selected' : ''}>${n}</option>`).join('')}</select>`, (l) => {
+          l.querySelector('select').onchange = (e) => { s[key] = e.target.value; refit(); save(); };
         });
       } else if (pd.type === 'code') {
         add(`${pd.label} <span class="muted">(r, g, b from 0 to 1)</span><textarea class="code-in" spellcheck="false">${esc(s[key])}</textarea><span class="err"></span>`, (l) => {

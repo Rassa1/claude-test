@@ -21,7 +21,7 @@ function animCatalog() {
 function buildPrompt(text, ctx) {
   return `You convert a plain-English description of a car LED taillight animation into JSON for a simulator that also generates ESP32 code.
 
-LIGHT: ${ctx.leds} LEDs per light in ${ctx.rows} rows (about ${ctx.widthCm} cm wide, ${ctx.heightCm} cm tall). There are two taillights (left and right, mirror images). This animation belongs to a button called "${ctx.name}" that drives: ${ctx.side} light(s). It ${ctx.repeat ? 'loops while active' : 'plays once and holds its last frame'}.
+LIGHT: ${ctx.leds} LEDs per light in ${ctx.rows} rows, about ${ctx.cols} LEDs across (${ctx.widthCm} cm wide, ${ctx.heightCm} cm tall). There are two taillights (left and right, mirror images). This animation belongs to a button called "${ctx.name}" that drives: ${ctx.side} light(s). It ${ctx.repeat ? 'loops while active' : 'plays once and holds its last frame'}.
 
 Return ONLY a JSON object:
 {"summary": "one short sentence describing what you made", "repeat": true|false, "steps": [STEP, ...]}
@@ -36,6 +36,8 @@ Params:
 - period: seconds per cycle (speed)
 - dir: one of ${Object.keys(DIRS).join(', ')} ("outer" = from the inner edge toward the car's outside edge, the normal turn-signal direction)
 - width: 0.02-1, count: integer 1-20, flashes: integer 1-10, trail: 0-0.5 background glow
+- text (for type "text"): the message, max 64 chars, A-Z 0-9 and basic punctuation (shown uppercase); speed: LEDs per second 1-40 (8 is easy to read); scroll: "left" (moves right to left, normal) or "right"; span: "across" (one line across both lights) or "each" (same text on each light); font: "auto", "small" (3x5) or "large" (5x7)
+- For a text step, set duration so the message passes fully at least once: roughly (2 x light width in LEDs + 2 + 6 x characters) / speed seconds when span is "across"
 
 Formula language for "custom" (compiles to both JavaScript and C++, so follow it exactly):
 - Statements separated by ";". Declare locals with "float name = expr;". Assign outputs r, g, b (0..1, default 0).
@@ -68,6 +70,13 @@ export function sanitizeSteps(raw) {
     s.flashes = Math.round(num(r.flashes, 1, 10, s.flashes));
     s.trail = num(r.trail, 0, 0.5, s.trail);
     s.brightness = num(r.brightness, 0.02, 1, s.brightness);
+    if (r.type === 'text') {
+      if (typeof r.text === 'string' && r.text.trim()) s.text = r.text.slice(0, 64);
+      s.speed = num(r.speed, 1, 40, s.speed);
+      if (['left', 'right'].includes(r.scroll)) s.scroll = r.scroll;
+      if (['across', 'each'].includes(r.span)) s.span = r.span;
+      if (['auto', 'small', 'large'].includes(r.font)) s.font = r.font;
+    }
     if (r.type === 'custom') {
       if (typeof r.code !== 'string' || !compiled(r.code)) continue;
       s.code = r.code;

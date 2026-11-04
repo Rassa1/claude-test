@@ -22,7 +22,7 @@ python3 -m http.server 8000
    - Simulator: click input wires on/off, “+30 s” to jump time, “Power-cycle ESP32” to test startup.
 3. **ESP32 code** – set data pins, LED chip, color order and power limit, then copy or download `taillight.ino`. It includes the button inputs (GPIO to GND, internal pull-ups) and uses the exact same math as the simulator.
 
-Animations: solid, off, sequential sweep, blink/hazard, brake flash, scanner, breathe, chase, color wave, rainbow, sparkle, and custom formulas (`js/custom.js`).
+Animations: solid, off, sequential sweep, blink/hazard, brake flash, scanner, breathe, chase, color wave, rainbow, sparkle, scrolling text (one line across both lights or the same on each, 3×5 or 5×7 font), and custom formulas (`js/custom.js`).
 
 ## Files
 - `js/matrix.js` – layout model + drawing
@@ -31,6 +31,7 @@ Animations: solid, off, sequential sweep, blink/hazard, brake flash, scanner, br
 - `js/engine.js` – buttons, layering, two-light scene
 - `js/ai.js` – Claude interpretation (claude.ai artifact runtime) with keyword fallback
 - `js/custom.js` – formula language compiled to JS and C++
+- `js/font.js` – pixel fonts for scrolling text
 - `js/pins.js` – ESP32 pin list, conflict checks
 - `js/codegen.js` – Arduino sketch generator
 - `js/app.js` – UI

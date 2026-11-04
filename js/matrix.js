@@ -67,7 +67,7 @@ export function computeLayout(m) {
     l.u = l.qu / 255;
     l.v = l.qv / 255;
   });
-  return { leds, outInfo, minX, maxX, minY, maxY, pitch };
+  return { leds, outInfo, minX, maxX, minY, maxY, pitch, rowCount: m.rows.length };
 }
 
 // Shape helpers -------------------------------------------------------------

@@ -5,6 +5,7 @@
 // t = seconds since this step started, pos = position along chosen direction.
 
 import { compileCustom, hash32 } from './custom.js';
+import { FONTS, textColumns, resolveFont } from './font.js';
 
 export const DIRS = {
   outer: 'Inner → Outer edge',
@@ -69,6 +70,11 @@ export const PARAMS = {
   flashes: { type: 'int', label: 'Flashes', min: 1, max: 10 },
   trail: { type: 'range', label: 'Background glow', min: 0, max: 0.5, step: 0.01 },
   code: { type: 'code', label: 'Formula' },
+  text: { type: 'text', label: 'Text' },
+  speed: { type: 'range', label: 'Scroll speed (LEDs/s)', min: 1, max: 40, step: 0.5 },
+  span: { type: 'select', label: 'Show on', options: { across: 'One line across both lights', each: 'Same text on each light' } },
+  scroll: { type: 'select', label: 'Scroll', options: { left: 'Right → left', right: 'Left → right' } },
+  font: { type: 'select', label: 'Font', options: { auto: 'Auto (fits the rows)', small: 'Small 3×5', large: 'Large 5×7' } },
 };
 
 const cache = new Map();
@@ -204,6 +210,42 @@ export const ANIMS = {
   return CRGB((uint8_t)(clamp01(r * BR) * 255.0f + 0.5f), (uint8_t)(clamp01(g * BR) * 255.0f + 0.5f), (uint8_t)(clamp01(b * BR) * 255.0f + 0.5f));`;
     },
   },
+  text: {
+    name: 'Scrolling text',
+    desc: 'Scrolls a message across the LEDs. Needs 5+ rows (7+ for the large font).',
+    uses: ['text', 'color', 'trail', 'speed', 'scroll', 'span', 'font'],
+    js: (p, L, t) => {
+      const fontName = resolveFont(p.font, L.nr), F = FONTS[fontName];
+      const cols = textColumns(p.text, fontName);
+      const across = p.span === 'across' && L.pair;
+      const W = L.wc + 1;
+      const gc = across && L.side ? W + 2 + L.u * (W - 1) : L.u * (W - 1);
+      const TW = across ? 2 * W + 2 : W;
+      const pos = (p.speed * t) % (TW + cols.length);
+      const left = p.scroll === 'right' ? pos - cols.length : TW - pos;
+      const tx = Math.floor(gc - left + 0.5);
+      const fy = Math.min(F.h - 1, Math.floor(L.v * F.h));
+      const on = tx >= 0 && tx < cols.length && (cols[tx] >> fy) & 1;
+      return on ? p.color : mix([0, 0, 0], p.color, p.trail);
+    },
+    cpp: (p, ctx) => {
+      const fontName = resolveFont(p.font, ctx.nr), F = FONTS[fontName];
+      const cols = textColumns(p.text, fontName);
+      const across = p.span === 'across' && ctx.pair;
+      const safe = String(p.text || '').replace(/[^\x20-\x7e]/g, '?').replace(/\*\//g, '* /');
+      return `// "${safe}" in the ${fontName} font, one byte per column (bit 0 = top row)
+  static const uint8_t COLS[${cols.length}] = { ${cols.join(', ')} };
+  const float W = LIGHT_COLS + 1.0f;
+  float gc = ${across ? '(side_ ? W + 2.0f + u * (W - 1.0f) : u * (W - 1.0f))' : 'u * (W - 1.0f)'};
+  const float TW = ${across ? '2.0f * W + 2.0f' : 'W'};
+  float pos = fmodf(${f(p.speed)} * t, TW + ${cols.length}.0f);
+  float left = ${p.scroll === 'right' ? `pos - ${cols.length}.0f` : 'TW - pos'};
+  int tx = (int)floorf(gc - left + 0.5f);
+  int fy = (int)(v * ${F.h}.0f); if (fy > ${F.h - 1}) fy = ${F.h - 1};
+  bool on = tx >= 0 && tx < ${cols.length} && ((COLS[tx] >> fy) & 1);
+  return shade(${rgb(p.color)}, (on ? 1.0f : ${f(p.trail)}) * BR);`;
+    },
+  },
   sparkle: {
     name: 'Sparkle',
     desc: 'Random twinkles over a dim base color.',
@@ -236,6 +278,7 @@ export function defaultParams(type) {
     rainbow: { period: 3, count: 1 },
     sparkle: { color2: [255, 255, 255], width: 0.15, trail: 0.25 },
     solid: { brightness: 0.4 },
+    text: { text: 'HELLO', trail: 0.04, speed: 8, scroll: 'left', span: 'across', font: 'auto', brightness: 1 },
     custom: { code: 'float w = tri(o * 2 - t * 0.5);\nr = w;\ng = w * 0.1;' },
   }[type] || {};
   return { ...base, ...t };
@@ -248,6 +291,7 @@ export function defaultDuration(s) {
     case 'brake': return +(s.flashes * s.period + 1.5).toFixed(2);
     case 'blink': return +(s.period * 4).toFixed(2);
     case 'off': return 1;
+    case 'text': return 8;
     default: return 4;
   }
 }

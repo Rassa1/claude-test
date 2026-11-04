@@ -11,6 +11,7 @@ const COLORS = {
 };
 
 const TYPE_WORDS = [
+  ['text', /\b(text|message|words?|says?|saying|spell\w*|scrolling text)\b|"[^"]+"|“[^”]+”/],
   ['off', /\b(off|pause|wait|nothing|blackout|lights out)\b/],
   ['rainbow', /\b(rainbow|unicorn|pride|rgb cycle)\b/],
   ['sparkle', /\b(sparkl\w*|twinkl\w*|glitter\w*|random)\b/],
@@ -58,6 +59,14 @@ function parseStep(raw) {
 
   const s = { type, ...defaultParams(type) };
   const notes = [];
+  if (type === 'text') {
+    const q = raw.match(/["“']([^"”']+)["”']/) || raw.match(/\b(?:says?|saying|text|message|spell(?:s|ing)?)\s*:?\s+(.+?)(?:\s+in\s+\w+|\s+on\s+|\s+across|\s+for\s+\d|,|$)/i);
+    if (q) s.text = q[1].trim().slice(0, 64);
+    if (/\beach\b|both lights separately|on each/.test(txt)) s.span = 'each';
+    if (/\bsmall\b|tiny/.test(txt)) s.font = 'small';
+    if (/\b(big|large)\b/.test(txt)) s.font = 'large';
+    if (/left to right|rightward|to the right/.test(txt)) s.scroll = 'right';
+  }
 
   const cols = findColors(txt);
   if (type === 'sparkle') {
@@ -83,6 +92,10 @@ function parseStep(raw) {
   else if (/bottom\s*(to|->)\s*top|\bupward|\bup\b|bottom up/.test(txt)) s.dir = 'up';
   else if (/top\s*(to|->)\s*bottom|\bdownward|\bdown\b|top down/.test(txt)) s.dir = 'down';
 
+  if (type === 'text') {
+    if (/\b(fast|quick)\b/.test(txt)) s.speed = 14;
+    if (/\bslow(ly)?\b/.test(txt)) s.speed = 5;
+  }
   // speed words
   if (/\b(super|very|really|extra) (fast|quick)\b|\bstrob/.test(txt)) s.period *= 0.35;
   else if (/\b(fast|quick|rapid)\b/.test(txt)) s.period *= 0.55;
@@ -151,4 +164,5 @@ export const EXAMPLES = [
   'red and amber wave for 6 seconds',
   'rainbow wave for 5 seconds then white sparkle on dim red for 4 seconds',
   'hazard: amber blink every 700ms',
+  'scroll the text "HELLO" across both lights',
 ];

@@ -1,8 +1,8 @@
 // Generates a complete Arduino sketch for ESP32 + FastLED that reproduces the
 // simulator exactly: same animation math, same button/layer rules.
-import { ANIMS, DIRS } from './animations.js';
+import { ANIMS, DIRS, fmtF } from './animations.js';
 import { CPP_HELPERS } from './custom.js';
-import { SIDE_MASK, condMasks, totalMs, stepMs } from './engine.js';
+import { SIDE_MASK, condMasks, totalMs, stepMs, lightCols } from './engine.js';
 
 const wrap = (arr, per = 20, indent = '  ') => {
   const lines = [];
@@ -32,6 +32,7 @@ export function generateSketch(matrix, layout, model) {
   const pinOf = (o, side) => (side ? o.pinR : o.pinL);
   const rowList = (rows) => rows.map((r) => r + 1).join(', ');
   const rowsDesc = matrix.rows.map((r, i) => ` *   row ${i + 1}: ${r.count} LEDs, shifted ${(+r.offset).toFixed(1)} mm`).join('\n');
+  const tctx = { nr: matrix.rows.length, wc: lightCols(layout), pair: lights === 'both' };
   const usesCustom = effects.some((b) => b.steps.some((s) => s.type === 'custom'));
   const inName = (id) => inputs.find((x) => x.id === id)?.name || '?';
   const condText = (fx) => {
@@ -54,7 +55,7 @@ static CRGB b${bk}s${k}(int i_, float u, float v, float o, int side_, float t) {
   float i = (float)i_; float side = (float)side_; float n = (float)NUM_LEDS;
   (void)i; (void)side; (void)n; (void)u; (void)v; (void)o; (void)t;
   const float BR = ${(+s.brightness).toFixed(3)}f; (void)BR;
-  ${def.cpp(s).replace(/\(uint32_t\)i\b/g, '(uint32_t)i_')}
+  ${def.cpp(s, tctx).replace(/\(uint32_t\)i\b/g, '(uint32_t)i_')}
 }`;
   }).join('\n\n')).join('\n\n');
 
@@ -110,6 +111,7 @@ ${btnDocs}
 #ifndef DEBOUNCE_MS
 #define DEBOUNCE_MS     25
 #endif
+#define LIGHT_COLS      ${fmtF(lightCols(layout))}    // light width in LED spacings (text effect)
 #define NUM_SIDES       ${sideIds.length}
 #define NUM_INPUTS      ${Math.max(1, inputs.length)}
 #define NUM_EFFECTS     ${Math.max(1, effects.length)}

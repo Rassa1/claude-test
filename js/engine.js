@@ -13,14 +13,17 @@
 import { ANIMS } from './animations.js';
 
 export const SIDE_MASK = { left: 1, right: 2, both: 3 };
+// light width measured in LED spacings (used by the text effect); rounded so JS and C++ agree
+export const lightCols = (layout) => +((layout.maxX - layout.minX) / layout.pitch).toFixed(4);
 
 // ---------------------------------------------------------------- scene
 // One or two lights. The right light is the mirror image of the left one.
-export function buildScene(layout, view) {
+export function buildScene(layout, view, pair = true) {
   const sides = view === 'both' ? [0, 1] : view === 'right' ? [1] : [0];
   const w = layout.maxX - layout.minX;
   const gap = Math.max(w * 0.7, layout.pitch * 6);
   const n = layout.leds.length;
+  const wc = lightCols(layout), nr = layout.rowCount || 1;
   const leds = [];
   for (const side of sides) {
     for (const L of layout.leds) {
@@ -29,7 +32,7 @@ export function buildScene(layout, view) {
       const x = side ? (sides.length === 2 ? mirroredX + w + gap : mirroredX) : L.x;
       leds.push({
         x, y: L.y, row: L.row, side, i: leds.length,
-        a: { i: L.i, n, side, u: qu / 255, v: L.v, o: (255 - L.qu) / 255 },
+        a: { i: L.i, n, side, u: qu / 255, v: L.v, o: (255 - L.qu) / 255, wc, nr, pair },
       });
     }
   }
