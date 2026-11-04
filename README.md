@@ -8,7 +8,7 @@ A live shuttle tracker that runs on rider reports. Every stop and every shuttle 
 
 | QR code | Page | What it does |
 |---|---|---|
-| At a stop | `/s/<stop>` | Next shuttle and ETA, **red "Behind schedule +N min"** when it's late, route map with "you are here", buttons: *Shuttle A is here*, *I'm waiting* |
+| At a stop | `/s/<stop>` | **First thing on screen: when the next shuttle arrives** (big minutes + clock time), **red "Behind schedule"** when it's late, then buttons *Shuttle A is here* / *I'm waiting*, and the route map |
 | Inside a shuttle | `/b/<shuttle>` | One big button for the stop it's pulling into next (*We're at Library*), other stops tucked away, optional hands-free location sharing |
 | — | `/` | All stops and shuttles with the map (linked from the pages above) |
 
@@ -43,9 +43,9 @@ Sample `npm run sim` (6 random mornings × 3 h, 2 shuttles, random traffic jams,
 |---|---|---|---|---|
 | Nobody reports (timetable only) | 3.8 min | 65% | — | — |
 | Nobody reports, 10 days of history | 3.6 min | 68% | — | — |
-| 10% of riders tap, plus history | 1.7 min | 76% | 75% | 22% |
-| 30% tap, plus history | 1.5 min | 83% | 78% | 17% |
-| 30% tap + prankster with location off | 1.5 min | 83% | 79% | 12% |
+| 10% of riders tap, plus history | 1.5 min | 80% | 75% | 22% |
+| 30% tap, plus history | 1.4 min | 86% | 78% | 17% |
+| 30% tap + prankster with location off | 1.4 min | 86% | 79% | 12% |
 
 ## Setup
 1. Edit `config.json`:

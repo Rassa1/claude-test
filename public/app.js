@@ -71,18 +71,26 @@
       const i = cfg.stops.findIndex(s => s.id === route.id);
       if (i < 0) return `<p>This QR code doesn’t match a stop. ${navLink('board', 'See all stops')}</p>`;
       const s = cfg.stops[i], st = state.stops[i], [e, then] = st.etas;
-      const forBus = e?.bus ? busName(e.bus) : 'Next shuttle';
-      const note = e?.source === 'typical' ? `No live reports yet. Based on the last ${e.days} days.`
-        : e?.source === 'schedule' ? 'No live reports yet. From the timetable.'
-        : e?.late ? `Running ${e.lateBy ? `${e.lateBy} min ` : ''}behind schedule.` : '';
+      // the answer people scanned for comes first: when the next shuttle gets here
+      const live = e?.source === 'live', here = live && e.mins === 0;
+      const big = !e ? '<span class="hero-num hero-none">No estimate yet</span>'
+        : here ? '<span class="hero-num">Here now</span>'
+        : `<span class="hero-num">${live ? '' : '~'}${e.mins}</span><span class="hero-unit">min</span>`;
+      const who = e?.bus ? esc(busName(e.bus)) : 'Next shuttle';
+      const when = !e ? 'No reports yet today, and no timetable for this time.'
+        : here ? `${who} is at the stop${e.departs ? `, leaves ${clock(e.departs)}` : ''}`
+        : `${who} · about ${clock(state.now + e.mins * 60000)}`;
+      const status = !e ? '' : e.source === 'typical' ? `<p class="hero-note">No live reports yet. Usual time from the last ${e.days} days.</p>`
+        : e.source === 'schedule' ? `<p class="hero-note">No live reports for ${who} yet. From the timetable.</p>`
+        : e.late ? `<p class="hero-flag late">Behind schedule${e.lateBy ? ` · ${e.lateBy} min late` : ''}</p>`
+        : e.lateBy != null ? '<p class="hero-flag ok">On time</p>' : '';
       return `
-        <p class="eyebrow">You’re at</p>
-        <h1>${esc(s.name)}</h1>
-        <section class="eta-card ${e?.late ? 'is-late' : ''}">
-          <div><div class="small muted">${esc(e?.source === 'typical' ? 'Next shuttle' : forBus)}</div>
-            ${note ? `<div class="note">${esc(note)}</div>` : ''}
-            ${then ? `<div class="small muted">Then ${esc(then.bus ? busName(then.bus) : 'another')} in ${then.mins} min</div>` : ''}</div>
-          ${eta(e)}
+        <section class="next-hero ${e?.late ? 'is-late' : ''} ${here ? 'is-here' : ''} ${e && !live ? 'is-approx' : ''}">
+          <p class="eyebrow">Next shuttle at ${esc(s.name)}</p>
+          <h1 class="hero-eta"><span class="visually-hidden">Next shuttle ${here ? 'is' : 'in'} </span>${big}</h1>
+          <p class="hero-when">${when}</p>
+          ${status}
+          ${then ? `<p class="hero-then">Then ${esc(then.bus ? busName(then.bus) : 'another')} in ${then.mins} min</p>` : ''}
         </section>
         <div class="actions">
           ${cfg.shuttles.map(b => `<button class="btn primary" data-act="arrive" data-bus="${b.id}">${cfg.shuttles.length > 1 ? `${esc(b.name)} is here` : 'The shuttle is here'}</button>`).join('')}

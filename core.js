@@ -288,8 +288,11 @@
           const e = liveEta(m.b.id, m.seg, m.cur, j, t, waitSince);
           if (e) etas.push({ bus: m.b.id, mins: Math.round(e.mins), source: 'live', ...lateness(m.b.id, j, e), ...(e.departs && { departs: e.departs }) });
         }
-        if (!etas.length) { const ty = typicalEta(s.id, t); if (ty) etas.push({ ...ty, source: 'typical' }); }
-        if (!etas.length) for (const m of models) {
+        const anyLive = etas.length > 0;
+        if (!anyLive) { const ty = typicalEta(s.id, t); if (ty) etas.push({ ...ty, source: 'typical' }); }
+        // shuttles with no live reports still count, from the timetable (unless past days already cover them all)
+        if (anyLive || !etas.length) for (const m of models) {
+          if (m.cur) continue;
           const x = schedNext(m.b.id, j, t);
           if (x != null && x - t < 3 * 60 * MIN) etas.push({ bus: m.b.id, mins: Math.round((x - t) / MIN), source: 'schedule' });
         }

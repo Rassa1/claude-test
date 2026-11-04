@@ -177,3 +177,11 @@ test('people still waiting at a stop the shuttle was due at mean it hasn\'t come
   report('arrive', 'library', 'w1');                                 // it finally shows up
   assert.strictEqual(bus().pos.stop, 'library');
 });
+
+test('a shuttle with no reports yet still counts, from the timetable', () => {
+  const { report, eta, tr } = setup(base, day(7, 40));
+  report('arrive', 'athletics', 'u1');                               // A is live, past the Library
+  const lib = tr.buildState().stops.find(s => s.id === 'library').etas;
+  assert.deepStrictEqual(lib.map(e => [e.bus, e.source]), [['B', 'schedule'], ['A', 'live']]);
+  assert.strictEqual(eta('library').mins, 14);                       // B leaves Main Gate 7:50, Library 7:54
+});

@@ -68,6 +68,25 @@ a { color: var(--route); }
 .eta-card .note { font-size: 14px; margin-top: 2px; }
 .eta-card.is-late .note { color: var(--late); font-weight: 700; }
 
+/* stop page: the next arrival is the first and biggest thing on the screen */
+.next-hero { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px 16px;
+  display: flex; flex-direction: column; gap: 4px; }
+.next-hero p { margin: 0; }
+.hero-eta { display: flex; align-items: baseline; gap: 6px; font: 600 1rem/1 var(--font-sign); margin: 2px 0 0; font-variant-numeric: tabular-nums; }
+.hero-num { font-size: 84px; line-height: .95; letter-spacing: -.01em; }
+.hero-unit { font-size: 30px; }
+.next-hero.is-here .hero-num { color: var(--now); font-size: 64px; }
+.hero-num.hero-none { font-size: 40px; color: var(--muted); }
+.next-hero.is-approx .hero-num, .next-hero.is-approx .hero-unit { color: var(--muted); }
+.next-hero.is-late { border-color: var(--late); box-shadow: inset 5px 0 0 var(--late); }
+.next-hero.is-late .hero-num, .next-hero.is-late .hero-unit { color: var(--late); }
+.hero-when { font-size: 17px; font-weight: 700; }
+.hero-flag { align-self: flex-start; font-size: 14px; font-weight: 700; padding: 3px 10px; border-radius: 99px; }
+.hero-flag.late { color: var(--late); background: var(--late-bg); }
+.hero-flag.ok { color: var(--now); background: var(--ok-bg); }
+.hero-note, .hero-then { font-size: 14px; color: var(--muted); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
 .actions { display: flex; flex-direction: column; gap: 8px; }
 .btn { display: block; width: 100%; font: 700 17px/1.2 var(--font-body); padding: 14px; border-radius: var(--radius); cursor: pointer;
   border: 1px solid var(--line); background: var(--card); color: var(--ink); text-align: center; }

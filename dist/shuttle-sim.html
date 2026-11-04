@@ -73,6 +73,25 @@ a { color: var(--route); }
 .eta-card .note { font-size: 14px; margin-top: 2px; }
 .eta-card.is-late .note { color: var(--late); font-weight: 700; }
 
+/* stop page: the next arrival is the first and biggest thing on the screen */
+.next-hero { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px 16px;
+  display: flex; flex-direction: column; gap: 4px; }
+.next-hero p { margin: 0; }
+.hero-eta { display: flex; align-items: baseline; gap: 6px; font: 600 1rem/1 var(--font-sign); margin: 2px 0 0; font-variant-numeric: tabular-nums; }
+.hero-num { font-size: 84px; line-height: .95; letter-spacing: -.01em; }
+.hero-unit { font-size: 30px; }
+.next-hero.is-here .hero-num { color: var(--now); font-size: 64px; }
+.hero-num.hero-none { font-size: 40px; color: var(--muted); }
+.next-hero.is-approx .hero-num, .next-hero.is-approx .hero-unit { color: var(--muted); }
+.next-hero.is-late { border-color: var(--late); box-shadow: inset 5px 0 0 var(--late); }
+.next-hero.is-late .hero-num, .next-hero.is-late .hero-unit { color: var(--late); }
+.hero-when { font-size: 17px; font-weight: 700; }
+.hero-flag { align-self: flex-start; font-size: 14px; font-weight: 700; padding: 3px 10px; border-radius: 99px; }
+.hero-flag.late { color: var(--late); background: var(--late-bg); }
+.hero-flag.ok { color: var(--now); background: var(--ok-bg); }
+.hero-note, .hero-then { font-size: 14px; color: var(--muted); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
 .actions { display: flex; flex-direction: column; gap: 8px; }
 .btn { display: block; width: 100%; font: 700 17px/1.2 var(--font-body); padding: 14px; border-radius: var(--radius); cursor: pointer;
   border: 1px solid var(--line); background: var(--card); color: var(--ink); text-align: center; }
@@ -551,8 +570,11 @@ window.SHUTTLE_CONFIG = {"title":"Campus Shuttle","timezone":"America/New_York",
           const e = liveEta(m.b.id, m.seg, m.cur, j, t, waitSince);
           if (e) etas.push({ bus: m.b.id, mins: Math.round(e.mins), source: 'live', ...lateness(m.b.id, j, e), ...(e.departs && { departs: e.departs }) });
         }
-        if (!etas.length) { const ty = typicalEta(s.id, t); if (ty) etas.push({ ...ty, source: 'typical' }); }
-        if (!etas.length) for (const m of models) {
+        const anyLive = etas.length > 0;
+        if (!anyLive) { const ty = typicalEta(s.id, t); if (ty) etas.push({ ...ty, source: 'typical' }); }
+        // shuttles with no live reports still count, from the timetable (unless past days already cover them all)
+        if (anyLive || !etas.length) for (const m of models) {
+          if (m.cur) continue;
           const x = schedNext(m.b.id, j, t);
           if (x != null && x - t < 3 * 60 * MIN) etas.push({ bus: m.b.id, mins: Math.round((x - t) / MIN), source: 'schedule' });
         }
@@ -940,18 +962,26 @@ window.SHUTTLE_CONFIG = {"title":"Campus Shuttle","timezone":"America/New_York",
       const i = cfg.stops.findIndex(s => s.id === route.id);
       if (i < 0) return `<p>This QR code doesn’t match a stop. ${navLink('board', 'See all stops')}</p>`;
       const s = cfg.stops[i], st = state.stops[i], [e, then] = st.etas;
-      const forBus = e?.bus ? busName(e.bus) : 'Next shuttle';
-      const note = e?.source === 'typical' ? `No live reports yet. Based on the last ${e.days} days.`
-        : e?.source === 'schedule' ? 'No live reports yet. From the timetable.'
-        : e?.late ? `Running ${e.lateBy ? `${e.lateBy} min ` : ''}behind schedule.` : '';
+      // the answer people scanned for comes first: when the next shuttle gets here
+      const live = e?.source === 'live', here = live && e.mins === 0;
+      const big = !e ? '<span class="hero-num hero-none">No estimate yet</span>'
+        : here ? '<span class="hero-num">Here now</span>'
+        : `<span class="hero-num">${live ? '' : '~'}${e.mins}</span><span class="hero-unit">min</span>`;
+      const who = e?.bus ? esc(busName(e.bus)) : 'Next shuttle';
+      const when = !e ? 'No reports yet today, and no timetable for this time.'
+        : here ? `${who} is at the stop${e.departs ? `, leaves ${clock(e.departs)}` : ''}`
+        : `${who} · about ${clock(state.now + e.mins * 60000)}`;
+      const status = !e ? '' : e.source === 'typical' ? `<p class="hero-note">No live reports yet. Usual time from the last ${e.days} days.</p>`
+        : e.source === 'schedule' ? `<p class="hero-note">No live reports for ${who} yet. From the timetable.</p>`
+        : e.late ? `<p class="hero-flag late">Behind schedule${e.lateBy ? ` · ${e.lateBy} min late` : ''}</p>`
+        : e.lateBy != null ? '<p class="hero-flag ok">On time</p>' : '';
       return `
-        <p class="eyebrow">You’re at</p>
-        <h1>${esc(s.name)}</h1>
-        <section class="eta-card ${e?.late ? 'is-late' : ''}">
-          <div><div class="small muted">${esc(e?.source === 'typical' ? 'Next shuttle' : forBus)}</div>
-            ${note ? `<div class="note">${esc(note)}</div>` : ''}
-            ${then ? `<div class="small muted">Then ${esc(then.bus ? busName(then.bus) : 'another')} in ${then.mins} min</div>` : ''}</div>
-          ${eta(e)}
+        <section class="next-hero ${e?.late ? 'is-late' : ''} ${here ? 'is-here' : ''} ${e && !live ? 'is-approx' : ''}">
+          <p class="eyebrow">Next shuttle at ${esc(s.name)}</p>
+          <h1 class="hero-eta"><span class="visually-hidden">Next shuttle ${here ? 'is' : 'in'} </span>${big}</h1>
+          <p class="hero-when">${when}</p>
+          ${status}
+          ${then ? `<p class="hero-then">Then ${esc(then.bus ? busName(then.bus) : 'another')} in ${then.mins} min</p>` : ''}
         </section>
         <div class="actions">
           ${cfg.shuttles.map(b => `<button class="btn primary" data-act="arrive" data-bus="${b.id}">${cfg.shuttles.length > 1 ? `${esc(b.name)} is here` : 'The shuttle is here'}</button>`).join('')}
