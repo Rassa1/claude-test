@@ -79,7 +79,7 @@
     {
       "id": "sample",
       "mapId": "dorm",
-      "title": "Sample: inside the door",
+      "title": "Practice: dorm room (sample)",
       "photo": "sample-dorm.jpg",
       "truth": {
         "pos": {
@@ -89,7 +89,7 @@
         "heading": 20
       },
       "difficulty": "easy",
-      "date": "today",
+      "date": "2026-11-01",
       "createdAt": "2026-11-05T00:00:00.000Z"
     }
   ],

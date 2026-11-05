@@ -45,6 +45,12 @@ export function openStore(dataDir, seedDir) {
   seedMaps.forEach((m, i) => {
     if (!db.maps.some(x => x.id === m.id)) { db.maps.splice(i, 0, m); added = true; }
   });
+  // Older versions made the dorm sample "today's round", which hid the campus. It's a practice round now.
+  const sample = db.rounds.find(r => r.id === 'sample' && r.title === 'Sample: inside the door');
+  if (sample) {
+    Object.assign(sample, { title: 'Practice: dorm room (sample)', date: '2026-11-01' });
+    added = true;
+  }
   if (added) write(db);
 
   return { db, photosDir, save: () => write(db) };

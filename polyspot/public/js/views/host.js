@@ -14,9 +14,8 @@ export async function host(root) {
     return;
   }
 
-  let lastMap = null;
-  try { lastMap = localStorage.getItem('polyspot.hostMap'); } catch {}
-  const state = { photo: null, map: maps.find(m => m.id === lastMap) || maps[0], pos: null, heading: 0, difficulty: scoring.defaultDifficulty, date: today(), title: '' };
+  // The campus is the default; the dorm floor plan is in the dropdown for indoor testing.
+  const state = { photo: null, map: maps.find(m => m.type === 'latlng') || maps[0], pos: null, heading: 0, difficulty: scoring.defaultDifficulty, date: today(), title: '' };
   let view, editor;
 
   // 1. photo
@@ -51,7 +50,6 @@ export async function host(root) {
   function useMap(map) {
     state.map = map;
     state.pos = null;
-    try { localStorage.setItem('polyspot.hostMap', map.id); } catch {}
     view?.destroy();
     view = createMapView(box, map);
     hint.textContent = view.hints.place;

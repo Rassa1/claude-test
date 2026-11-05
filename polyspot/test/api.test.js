@@ -23,11 +23,12 @@ before(async () => {
 });
 after(() => { server.close(); fs.rmSync(dataDir, { recursive: true, force: true }); });
 
-test('first run seeds a map and a sample round dated today, without leaking the answer', async () => {
+test('first run seeds the campus + dorm maps and a practice round, without leaking the answer', async () => {
   const maps = (await call('GET', '/api/maps')).body;
   assert.deepEqual(maps.map(m => m.id), ['campus', 'dorm']);
   assert.equal(maps[0].type, 'latlng');
-  const { body } = await call('GET', `/api/rounds/today?date=${localDate()}`);
+  assert.equal((await call('GET', `/api/rounds/today?date=${localDate()}`)).body.round, null, 'no round released today yet');
+  const { body } = await call('GET', '/api/rounds/today?date=2026-11-01');
   assert.equal(body.round.id, 'sample');
   assert.equal(body.round.truth, undefined);
   const photo = await fetch(base + body.round.photoUrl);
@@ -125,3 +126,14 @@ test('license and notice files are served to the About page', async () => {
   assert.match(await (await fetch(base + '/THIRD_PARTY_NOTICES.txt')).text(), /ODbL/);
 });
 
+test('upgrade: the old dorm sample stops being today\'s round', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'polyspot-old2-'));
+  fs.mkdirSync(path.join(dir, 'photos'));
+  const old = { id: 'sample', mapId: 'dorm', title: 'Sample: inside the door', photo: 'x.jpg', truth: { pos: { x: 1, y: 1 }, heading: 0 }, difficulty: 'easy', date: localDate(), createdAt: '2026-11-05T00:00:00.000Z' };
+  fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify({ maps: [], rounds: [old], guesses: [] }));
+  createApp({ dataDir: dir });
+  const db = JSON.parse(fs.readFileSync(path.join(dir, 'db.json'), 'utf8'));
+  assert.equal(db.rounds[0].date, '2026-11-01');
+  assert.equal(db.rounds[0].title, 'Practice: dorm room (sample)');
+  fs.rmSync(dir, { recursive: true, force: true });
+});

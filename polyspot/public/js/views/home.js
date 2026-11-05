@@ -10,7 +10,7 @@ export async function home(root) {
       h('a', { class: 'btn big primary', href: '#/play/today' }, '▶  Play today’s round'),
       h('a', { class: 'btn big', href: '#/host' }, '📷  Host a round'),
       h('a', { class: 'btn big', href: '#/rounds' }, '🗂  All rounds & history'),
-      h('a', { class: 'btn big', href: '#/map' }, '📐  Edit the map')),
+      h('a', { class: 'btn big', href: '#/map/campus' }, '🗺  Campus map')),
   );
   const footer = h('p', { class: 'center small muted' }, h('a', { href: '#/about' }, 'About & licenses'), ' · Not affiliated with Cal Poly Pomona');
   main.append(footer);
