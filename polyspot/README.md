@@ -1,6 +1,6 @@
 # PolySpot
 
-A GeoGuessr-style game for Cal Poly Pomona. The host takes one photo and marks where they stood and which way the camera faced. The player looks at the photo, taps a spot on the map and aims an arrow. The game scores both the position and the direction.
+A photo-location guessing game for Cal Poly Pomona. The host takes one photo and marks where they stood and which way the camera faced. The player looks at the photo, taps a spot on the map and aims an arrow. The game scores both the position and the direction.
 
 There are two maps:
 - **Cal Poly Pomona campus:** an overhead satellite view (with a street-map toggle) labeled with building names from OpenStreetMap. This is the default.
@@ -8,7 +8,7 @@ There are two maps:
 
 It runs on your laptop, and your phone can play it over the same Wi-Fi. There are no accounts and nothing goes to the cloud. Data is kept in `data/db.json` and `data/photos/`.
 
-**Internet:** the campus map's satellite/street tiles load from Esri and OpenStreetMap on whichever device shows the map. Building names are downloaded once by the laptop. The dorm floor plan works fully offline.
+**Internet:** the campus map's satellite/street tiles load from USGS and OpenStreetMap (or Esri, if you add a key) on whichever device shows the map. Building names are downloaded once by the laptop. The dorm floor plan works fully offline.
 
 ![Play → results](docs/screens.png)
 
@@ -41,7 +41,7 @@ The first run loads sample data: the campus map, a 12 × 15 ft dorm-room map, an
 | `npm run cert` | Make HTTPS certificates for the phone compass (see below) |
 | `npm run reset` | Delete all local data. The next start loads the sample again |
 
-You can change the defaults with environment variables `PORT`, `HTTPS_PORT`, `HOST` (default `0.0.0.0`) and `DATA_DIR`.
+You can change the defaults with environment variables `PORT`, `HTTPS_PORT`, `HOST` (default `0.0.0.0`) and `DATA_DIR`. `ESRI_API_KEY` turns on sharper satellite imagery (see [Legal](#legal-and-licenses)).
 
 ### Phone can't connect?
 - **Firewall:** let Node accept incoming connections. macOS and Windows ask the first time; if you clicked "Deny", allow it in the firewall settings.
@@ -66,7 +66,7 @@ Browsers only allow the compass on secure pages. `http://localhost` counts as se
 ## How to play
 
 1. **Edit the map** (`📐`). Use the dropdown at the top to switch maps.
-   - **Campus:** the dashed box is the play area; guesses can't go outside it. Pan or zoom to the area you want, then tap **Use current view as play area**. Re-import or rename building labels, add your own (a fountain, a garden…), and choose feet or meters for distances. The layers button switches between Satellite and Map and hides labels. Labels appear as you zoom in.
+   - **Campus:** the dashed box is the play area; guesses can't go outside it. Pan or zoom to the area you want, then tap **Use current view as play area**. Re-import or rename building labels, add your own (a fountain, a garden…), and choose feet or meters for distances. The layers button switches between satellite and street map and hides labels. Labels appear as you zoom in.
    - **Dorm floor plan:** enter width and length in feet or meters (there's a toggle). The plan is drawn to scale with a grid. Add labeled features (door, bed, desk…) and tap where each one is.
 2. **Host a round** (`📷`):
    - Take a photo (opens the camera) or choose one. The photo is shrunk to about 0.5 MB in the browser and its EXIF/GPS data is removed.
@@ -118,7 +118,7 @@ polyspot/
 │   └── geo.js              coordinate systems: floorplan {x,y} meters, latlng {lat,lng}
 ├── public/
 │   ├── index.html, style.css
-│   ├── vendor/             Leaflet 1.9.4 (BSD-2), QR code generator (MIT)
+│   ├── vendor/             Leaflet 1.9.4 (BSD-2), QR code generator (MIT), their license files
 │   └── js/
 │       ├── app.js          hash router
 │       ├── map/index.js    map adapter interface + registry
@@ -130,7 +130,9 @@ polyspot/
 │       └── views/          home, host, play, results, rounds, map editor
 ├── seed/                   sample map + round (copied to data/ on first run)
 ├── scripts/                make-cert.js, reset.js
-└── test/                   node --test
+├── test/                   node --test
+├── LICENSE                 MIT
+└── THIRD_PARTY_NOTICES.md  libraries, map imagery/data terms, credits
 ```
 
 ### API
@@ -156,9 +158,34 @@ Views never touch SVG or Leaflet directly. They call the map adapter interface i
 
 A `latlng` map has a play area, `bounds: { sw, ne }`. To add another real place (say, a second campus), create one with the API or copy the campus entry in `data/db.json` with new bounds.
 
+## Legal and licenses
+
+- **Code:** PolySpot is MIT-licensed ([`LICENSE`](LICENSE)). Bundled libraries keep their own licenses: Leaflet is BSD 2-Clause and qrcode-generator is MIT. Every component, service and credit is listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md), and the app shows the same under **Home → About & licenses**.
+- **Map credits:** the credits that map providers require show in the corner of the campus map. Leave them visible.
+- **Default satellite imagery** comes from **USGS The National Map** (U.S. government aerial photos). It needs no account and has no use restrictions; just keep the credit. It's sharp enough to see buildings, paths and parking lots, but blurry at the closest zoom.
+- **Sharper imagery (optional): Esri World Imagery.** Esri requires an account for this.
+  1. Create a free ArcGIS Location Platform account at [developers.arcgis.com](https://developers.arcgis.com).
+  2. Create an API key with the *Basemaps* privilege. Restrict it to your own use.
+  3. Start the server with the key:
+     - macOS/Linux: `ESRI_API_KEY=your_key npm start`
+     - Windows PowerShell: `$env:ESRI_API_KEY="your_key"; npm start`
+
+  A "Satellite (Esri)" layer appears and becomes the default. Stay within Esri's free-tier limits and terms.
+- **Street map and building names** come from OpenStreetMap:
+  - The tile server is for light, normal browser use. No bulk or offline downloading.
+  - Building names are under the [ODbL](https://www.openstreetmap.org/copyright). Fine to use in the app with credit. If you publish them (e.g. share `data/db.json`), credit OpenStreetMap and share them under the ODbL.
+- **Not affiliated:** PolySpot is an independent project. It is not affiliated with or endorsed by Cal Poly Pomona, the CSU, or GeoGuessr, and it uses none of their logos or content.
+- **Before going public** (a real website, many players, ads or payments): move off OpenStreetMap's tile server and Esri's free tier to a paid or self-hosted tile provider, and check every provider's current terms. The summary here is a good-faith guide for a personal project, not legal advice.
+
+### Photos and privacy
+- Photos and guesses stay on the host's laptop. Uploads are shrunk and their EXIF/GPS location data is removed.
+- Only upload photos you took or have permission to use.
+- Leave out people who haven't agreed, ID cards, screens and room numbers.
+- Ask roommates before photographing shared rooms, and follow University Housing rules.
+
 ## Suggested next steps
 
-1. **Offline campus map:** cache the satellite tiles for the play area on the laptop, so the campus works without internet.
+1. **Offline campus map:** serve the play area's imagery from the laptop, built from USGS/NAIP downloads (public domain) rather than by scraping tile servers, so the campus works without internet.
 2. **Daily release:** hide rounds dated in the future from players, allow one scored guess per day per player (practice guesses unscored), and add a countdown to the next round. `date` is already stored and `/api/rounds/today` exists.
 3. **Players and leaderboard:** start with a nickname stored on the phone (no accounts), then daily/weekly leaderboards and streaks.
 4. **Multiplayer:** add a room code, then everyone guesses the same round on their own phone, and results show all guesses together (WebSocket or polling).

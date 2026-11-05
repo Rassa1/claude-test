@@ -24,7 +24,9 @@ const urls = {
   https: hasCerts ? ips.map(ip => `https://${ip}:${HTTPS_PORT}`) : [],
 };
 
-const app = createApp({ dataDir: DATA_DIR, info: () => ({ urls }) });
+// Optional: free ArcGIS Location Platform API key for sharper Esri satellite imagery (see README → Legal).
+const ESRI_API_KEY = process.env.ESRI_API_KEY || null;
+const app = createApp({ dataDir: DATA_DIR, info: () => ({ urls, esriApiKey: ESRI_API_KEY }) });
 
 const onError = port => err => {
   console.error(err.code === 'EADDRINUSE' ? `Port ${port} is already in use. Try: PORT=3001 npm start` : err);

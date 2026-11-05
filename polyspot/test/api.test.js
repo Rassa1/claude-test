@@ -114,3 +114,14 @@ test('existing data gets newly added seed maps (e.g. the campus) on upgrade', as
   assert.equal(db.maps[1].name, 'Old dorm', 'existing maps are untouched');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('license and notice files are served to the About page', async () => {
+  for (const url of ['/LICENSE.txt', '/THIRD_PARTY_NOTICES.txt', '/vendor/leaflet/LICENSE', '/vendor/qrcode-generator.LICENSE']) {
+    const res = await fetch(base + url);
+    assert.equal(res.status, 200, url);
+    assert.match(res.headers.get('content-type'), /text\/plain/, url);
+  }
+  assert.match(await (await fetch(base + '/LICENSE.txt')).text(), /MIT License/);
+  assert.match(await (await fetch(base + '/THIRD_PARTY_NOTICES.txt')).text(), /ODbL/);
+});
+

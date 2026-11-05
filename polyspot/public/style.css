@@ -222,6 +222,8 @@ input[type="text"], input[type="number"], input[type="date"], select {
 .round-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
 .round-actions .btn.primary { flex: 1; }
 
+.credits { margin: 0; padding-left: 18px; display: grid; gap: 8px; font-size: 0.9rem; }
+
 /* map editor */
 .features-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .features-list li { display: flex; gap: 8px; align-items: center; }

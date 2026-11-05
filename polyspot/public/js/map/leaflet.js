@@ -1,7 +1,9 @@
 // Real-world map adapter (Leaflet): overhead satellite imagery or a street map. Positions are { lat, lng };
 // headings are compass bearings (0 = north, which is up). See ./index.js for the interface.
-// Map tiles load from the internet (Esri imagery, OpenStreetMap); everything else stays local.
+// Map tiles load from the internet; everything else stays local. Each provider's terms and required credit
+// are listed in THIRD_PARTY_NOTICES.md. Credits show in the map's attribution corner.
 import { bearing, clampPos } from '/shared/geo.js';
+import { runtime } from '../runtime.js';
 import { h } from '../ui.js';
 
 const CONE_HALF_ANGLE = 30;
@@ -10,16 +12,27 @@ const rad = d => (d * Math.PI) / 180;
 const deg = r => (r * 180) / Math.PI;
 const ll = p => [p.lat, p.lng];
 
-const TILES = {
-  Satellite: {
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Imagery © Esri, Maxar, Earthstar Geographics',
-  },
-  Map: {
-    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  },
-};
+const OSM_COPYRIGHT = '<a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+/** Base layers; the first one is shown by default. */
+function baseLayers(L) {
+  const layers = {};
+  const esriKey = runtime.info?.esriApiKey;
+  if (esriKey) {
+    // Sharper imagery. Needs a free ArcGIS Location Platform API key (ESRI_API_KEY); Esri requires "Powered by Esri".
+    layers['Satellite (Esri)'] = L.tileLayer(
+      `https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=${encodeURIComponent(esriKey)}`,
+      { maxNativeZoom: 19, maxZoom: 21, attribution: 'Powered by <a href="https://www.esri.com">Esri</a> | Esri, Maxar, Earthstar Geographics, and the GIS User Community' });
+  }
+  // U.S. government aerial imagery (mostly USDA NAIP). No use restrictions; credit requested.
+  layers['Satellite (USGS)'] = L.tileLayer(
+    'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
+    { maxNativeZoom: 16, maxZoom: 21, attribution: 'Imagery: USDA, <a href="https://www.usgs.gov/programs/national-geospatial-program/national-map">USGS The National Map</a>' });
+  // OpenStreetMap's own tile server: fine for light use with credit; no bulk or offline downloading.
+  layers['Street map (OSM)'] = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { maxNativeZoom: 19, maxZoom: 21, attribution: `© ${OSM_COPYRIGHT}` });
+  return layers;
+}
 
 /** Point `meters` away from p along compass bearing `brg`. */
 function destination(p, brg, meters) {
@@ -44,9 +57,8 @@ export function createLeafletView(container, initialMap) {
   const lmap = L.map(el, { doubleClickZoom: false, zoomSnap: 0.5, minZoom: 13, maxZoom: 21 });
   el.style.position = 'absolute'; // Leaflet sets 'relative' when created before the element is on the page
   lmap.attributionControl.setPrefix(false);
-  const bases = Object.fromEntries(Object.entries(TILES).map(([name, t]) =>
-    [name, L.tileLayer(t.url, { attribution: t.attribution, maxNativeZoom: 19, maxZoom: 21 })]));
-  bases.Satellite.addTo(lmap);
+  const bases = baseLayers(L);
+  Object.values(bases)[0].addTo(lmap);
   const areaLayer = L.layerGroup().addTo(lmap);
   const labelLayer = L.layerGroup().addTo(lmap);
   const lineLayer = L.layerGroup().addTo(lmap);
@@ -95,8 +107,17 @@ export function createLeafletView(container, initialMap) {
     for (const l of lines) L.polyline([ll(l.a), ll(l.b)], { color: cssColor(l.color) || '#fff', weight: 3, dashArray: '8 7', interactive: false }).addTo(lineLayer);
   }
 
+  // Building names imported from OpenStreetMap are ODbL data: credit them while they're on the map.
+  const OSM_LABEL_CREDIT = `Building names © ${OSM_COPYRIGHT} (ODbL)`;
+  let creditShown = false;
+
   function drawLabels() {
     labelLayer.clearLayers();
+    const fromOsm = (map.features || []).some(f => f.source === 'osm');
+    if (fromOsm !== creditShown) {
+      lmap.attributionControl[fromOsm ? 'addAttribution' : 'removeAttribution'](OSM_LABEL_CREDIT);
+      creditShown = fromOsm;
+    }
     for (const f of map.features || []) {
       L.circleMarker(ll(f.pos), { radius: 3.5, color: '#fff', weight: 1.5, fillColor: f.kind === 'parking' ? '#3b82f6' : '#111', fillOpacity: 1, interactive: false })
         .bindTooltip(f.label, { permanent: true, direction: 'top', offset: [0, -4], className: `feat-tip kind-${f.kind || 'custom'}` })

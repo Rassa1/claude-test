@@ -12,13 +12,15 @@ export async function home(root) {
       h('a', { class: 'btn big', href: '#/rounds' }, '🗂  All rounds & history'),
       h('a', { class: 'btn big', href: '#/map' }, '📐  Edit the map')),
   );
+  const footer = h('p', { class: 'center small muted' }, h('a', { href: '#/about' }, 'About & licenses'), ' · Not affiliated with Cal Poly Pomona');
+  main.append(footer);
 
   const info = await api.info().catch(() => null);
   if (!info) return;
   const onLaptop = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(location.hostname);
   const { http = [], https = [] } = info.urls || {};
   if (onLaptop && http.length) {
-    main.append(card(
+    footer.before(card(
       h('h2', {}, 'Open on your phone'),
       h('p', { class: 'small muted' }, 'Same Wi-Fi as this laptop. Scan or type:'),
       qrBox(http[0]),
@@ -27,6 +29,6 @@ export async function home(root) {
     ));
   } else if (!window.isSecureContext && https.length) {
     const url = https.find(u => u.includes(location.hostname)) || https[0];
-    main.append(card(h('p', { class: 'small muted' }, 'To use the phone compass while hosting, open ', h('a', { href: url }, url), '.')));
+    footer.before(card(h('p', { class: 'small muted' }, 'To use the phone compass while hosting, open ', h('a', { href: url }, url), '.')));
   }
 }

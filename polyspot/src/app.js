@@ -12,6 +12,7 @@ import { fetchOsmFeatures } from './osm.js';
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const SHARED_DIR = path.join(ROOT, 'shared');
+const LEGAL_FILES = { '/LICENSE.txt': 'LICENSE', '/THIRD_PARTY_NOTICES.txt': 'THIRD_PARTY_NOTICES.md' };
 const MAX_BODY = 20 * 1024 * 1024; // photos arrive base64-encoded; the browser already shrinks them to ~0.5 MB
 const MAX_PHOTO = 12 * 1024 * 1024;
 
@@ -52,13 +53,14 @@ function readJson(req) {
   });
 }
 
-function serveFile(res, root, rel, cache = 'no-store') {
+function serveFile(res, root, rel, cache = 'no-store', type) {
   const file = path.resolve(root, '.' + path.posix.normalize('/' + rel));
   if (!file.startsWith(root + path.sep)) return false;
   let stat;
   try { stat = fs.statSync(file); } catch { return false; }
   if (!stat.isFile()) return false;
-  res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'Cache-Control': cache });
+  const mime = type || MIME[path.extname(file).toLowerCase()] || (path.basename(file).includes('LICENSE') ? 'text/plain; charset=utf-8' : 'application/octet-stream');
+  res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': cache });
   fs.createReadStream(file).pipe(res);
   return true;
 }
@@ -264,6 +266,7 @@ export function createApp({ dataDir, seedDir = path.join(ROOT, 'seed'), info = (
       if (req.method !== 'GET' && req.method !== 'HEAD') fail(405, 'Method not allowed');
       if (p.startsWith('/photos/') && serveFile(res, store.photosDir, p.slice('/photos/'.length), 'public, max-age=31536000, immutable')) return;
       if (p.startsWith('/shared/') && serveFile(res, SHARED_DIR, p.slice('/shared/'.length))) return;
+      if (LEGAL_FILES[p] && serveFile(res, ROOT, LEGAL_FILES[p], 'no-store', 'text/plain; charset=utf-8')) return;
       if (serveFile(res, PUBLIC_DIR, p === '/' ? 'index.html' : p)) return;
       fail(404, 'Not found');
     } catch (err) {

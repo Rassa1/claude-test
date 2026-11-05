@@ -5,11 +5,14 @@ import { mapEditor } from './views/mapEditor.js';
 import { play } from './views/play.js';
 import { result } from './views/result.js';
 import { playToday, rounds } from './views/rounds.js';
+import { loadRuntime } from './runtime.js';
 import { h } from './ui.js';
+import { about } from './views/about.js';
 
 const routes = [
   [/^#?\/?$/, home],
   [/^#\/host$/, host],
+  [/^#\/about$/, about],
   [/^#\/map(?:\/([\w-]+))?$/, mapEditor],
   [/^#\/rounds$/, rounds],
   [/^#\/play\/today$/, playToday],
@@ -42,4 +45,4 @@ async function render() {
 }
 
 window.addEventListener('hashchange', render);
-render();
+loadRuntime().then(render);
