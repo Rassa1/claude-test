@@ -25,7 +25,8 @@ after(() => { server.close(); fs.rmSync(dataDir, { recursive: true, force: true 
 
 test('first run seeds a map and a sample round dated today, without leaking the answer', async () => {
   const maps = (await call('GET', '/api/maps')).body;
-  assert.equal(maps[0].id, 'dorm');
+  assert.deepEqual(maps.map(m => m.id), ['campus', 'dorm']);
+  assert.equal(maps[0].type, 'latlng');
   const { body } = await call('GET', `/api/rounds/today?date=${localDate()}`);
   assert.equal(body.round.id, 'sample');
   assert.equal(body.round.truth, undefined);
@@ -80,4 +81,36 @@ test('static files and path traversal', async () => {
   assert.equal((await call('GET', '/shared/scoring.config.js')).status, 200);
   assert.equal((await call('GET', '/../src/app.js')).status, 404);
   assert.equal((await call('GET', '/photos/..%2Fdb.json')).status, 404);
+});
+
+test('campus map: rounds and guesses use lat/lng; play area is validated', async () => {
+  const truth = { pos: { lat: 34.0577, lng: -117.8223 }, heading: 90 };
+  const r = await call('POST', '/api/rounds', { mapId: 'campus', photo: PNG, truth, difficulty: 'easy' });
+  assert.equal(r.status, 201);
+  const g = await call('POST', `/api/rounds/${r.body.id}/guesses`, { pos: { lat: 34.0586, lng: -117.8223 }, heading: 90 });
+  assert.ok(Math.abs(g.body.guess.distance - 100) < 1, `~100 m, got ${g.body.guess.distance}`);
+  assert.ok(g.body.guess.position > 3000 && g.body.guess.position < 5000);
+  // a guess far outside the play area is pulled back to its edge
+  const far = await call('POST', `/api/rounds/${r.body.id}/guesses`, { pos: { lat: 40, lng: -117.8223 }, heading: 90 });
+  assert.equal(far.body.guess.pos.lat, 34.066);
+  assert.equal((await call('POST', `/api/rounds/${r.body.id}/guesses`, { pos: { x: 1, y: 1 }, heading: 0 })).status, 400);
+
+  const campus = (await call('GET', '/api/maps/campus')).body;
+  const moved = await call('PUT', '/api/maps/campus', { ...campus, bounds: { sw: { lat: 34.05, lng: -117.83 }, ne: { lat: 34.06, lng: -117.81 } }, features: [{ label: 'Fountain', pos: { lat: 34.055, lng: -117.82 } }] });
+  assert.equal(moved.body.type, 'latlng');
+  assert.equal(moved.body.features[0].label, 'Fountain');
+  assert.equal(moved.body.features[0].source, 'user');
+  assert.equal((await call('PUT', '/api/maps/campus', { ...campus, bounds: { sw: { lat: 34.06, lng: -117.81 }, ne: { lat: 34.05, lng: -117.83 } } })).status, 400);
+  assert.equal((await call('PUT', '/api/maps/campus', { ...campus, bounds: { sw: { lat: 30, lng: -120 }, ne: { lat: 35, lng: -110 } } })).status, 400);
+});
+
+test('existing data gets newly added seed maps (e.g. the campus) on upgrade', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'polyspot-old-'));
+  fs.mkdirSync(path.join(dir, 'photos'));
+  fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify({ maps: [{ id: 'dorm', type: 'floorplan', name: 'Old dorm', units: 'ft', width: 3, length: 4, features: [] }], rounds: [], guesses: [] }));
+  createApp({ dataDir: dir });
+  const db = JSON.parse(fs.readFileSync(path.join(dir, 'db.json'), 'utf8'));
+  assert.deepEqual(db.maps.map(m => m.id), ['campus', 'dorm']);
+  assert.equal(db.maps[1].name, 'Old dorm', 'existing maps are untouched');
+  fs.rmSync(dir, { recursive: true, force: true });
 });

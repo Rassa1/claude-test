@@ -1,8 +1,14 @@
 # PolySpot
 
-A GeoGuessr-style game for Cal Poly Pomona, starting with a dorm-room prototype. The host takes one photo and marks where they stood and which way the camera faced. The player looks at the photo, taps a spot on the map and aims an arrow. The game scores both the position and the direction.
+A GeoGuessr-style game for Cal Poly Pomona. The host takes one photo and marks where they stood and which way the camera faced. The player looks at the photo, taps a spot on the map and aims an arrow. The game scores both the position and the direction.
+
+There are two maps:
+- **Cal Poly Pomona campus:** an overhead satellite view (with a street-map toggle) labeled with building names from OpenStreetMap. This is the default.
+- **My dorm room:** a to-scale floor plan for testing indoors.
 
 It runs on your laptop, and your phone can play it over the same Wi-Fi. There are no accounts and nothing goes to the cloud. Data is kept in `data/db.json` and `data/photos/`.
+
+**Internet:** the campus map's satellite/street tiles load from Esri and OpenStreetMap on whichever device shows the map. Building names are downloaded once by the laptop. The dorm floor plan works fully offline.
 
 ![Play → results](docs/screens.png)
 
@@ -25,7 +31,7 @@ npm start
 - **Laptop:** open `http://localhost:3000`.
 - **Phone:** join the same Wi-Fi as the laptop and open the "On your phone" address. You can also scan the QR code shown on the laptop's home page.
 
-The first run loads sample data: a 12 × 15 ft dorm-room map with a door, bed, desk, window and closet, plus one sample round dated today.
+The first run loads sample data: the campus map, a 12 × 15 ft dorm-room map, and one sample round in the dorm dated today. On start, the server also fetches campus building names from OpenStreetMap (it prints `Loaded N building/place names…`). If the laptop was offline, it retries on the next start, or you can use **Edit map → Import building names**.
 
 | Command | What it does |
 |---|---|
@@ -59,13 +65,18 @@ Browsers only allow the compass on secure pages. `http://localhost` counts as se
 
 ## How to play
 
-1. **Edit the map** (`📐`): enter width and length in feet or meters (there's a toggle). The plan is drawn to scale with a grid. Add labeled features (door, bed, desk…) and tap where each one is.
+1. **Edit the map** (`📐`). Use the dropdown at the top to switch maps.
+   - **Campus:** the dashed box is the play area; guesses can't go outside it. Pan or zoom to the area you want, then tap **Use current view as play area**. Re-import or rename building labels, add your own (a fountain, a garden…), and choose feet or meters for distances. The layers button switches between Satellite and Map and hides labels. Labels appear as you zoom in.
+   - **Dorm floor plan:** enter width and length in feet or meters (there's a toggle). The plan is drawn to scale with a grid. Add labeled features (door, bed, desk…) and tap where each one is.
 2. **Host a round** (`📷`):
    - Take a photo (opens the camera) or choose one. The photo is shrunk to about 0.5 MB in the browser and its EXIF/GPS data is removed.
-   - **Tap where you stood, then drag toward where the camera pointed.** Drag the dot to move it, or the arrow tip to re-aim it. The slider and the ⟲/⟳ buttons fine-tune the direction.
+   - Pick the map (the app remembers your last choice).
+   - **Campus:** pinch to zoom, **tap where you stood**, then drag the **white ring** to aim. Drag the dot to move it.
+   - **Floor plan:** **tap where you stood and drag toward where the camera pointed**. Drag the dot to move it, or the arrow tip to re-aim it.
+   - On either map, the slider and the ⟲/⟳ buttons fine-tune the direction. On campus, north is up, so the phone compass needs no alignment.
    - Pick a difficulty (Easy, Hard, Nighttime or Impossible) and a release date (default today). Then save.
-3. **Play** (`▶`): this opens today's round. The full list under **All rounds** lets you pick any round for testing. The photo shows full screen (tap it to zoom). Tap **Guess on map →**, place yourself and aim with the same tap-and-drag, then submit.
-4. **Results:** both positions and both view cones on the map, with a dashed line between the positions. You also get the distance error, the angle error (shortest difference, 0–180°), the points, and your guess history for that round. Tap a past guess to see it on the map.
+3. **Play** (`▶`): this opens today's round. The full list under **All rounds** lets you pick any round for testing. The photo shows full screen (tap it to zoom). Tap **Guess on map →**, place yourself and aim the same way as the host, then submit.
+4. **Results:** the map zooms to show both positions and both view cones, with a dashed line between the positions. You also get the distance error, the angle error (shortest difference, 0–180°), the points, and your guess history for that round. Tap a past guess to see it on the map.
 
 The answer never leaves the server until a guess has been made for that round.
 
@@ -87,7 +98,9 @@ total     = (position + direction) × difficulty.multiplier   (if useDifficultyM
 | Nighttime | 1.6 | ×1.5 | 15,000 |
 | Impossible | 2.0 | ×2 | 20,000 |
 
-Example: in the 12 × 15 ft room on Easy, the scale is about 2.9 ft. A guess 1 ft off gets about 3,530 position points and one 3 ft off gets about 1,770.
+Examples on Easy:
+- **Dorm (12 × 15 ft):** the scale is about 2.9 ft. A guess 1 ft off gets about 3,530 position points; 3 ft off gets about 1,770.
+- **Campus (default play area, about 3 km across):** the scale is about 450 m. A guess 50 m off gets about 4,470 points, 100 m off about 4,000, and 300 m off about 2,560. For a tougher campus game, lower `scaleFraction` (0.05 gives a scale of about 150 m) or shrink the play area.
 
 ## Project layout
 
@@ -97,6 +110,7 @@ polyspot/
 ├── src/
 │   ├── app.js              JSON API + static files (no framework)
 │   ├── store.js            data/db.json + data/photos/, seeding on first run
+│   ├── osm.js              building names from OpenStreetMap (Overpass API)
 │   └── net.js              finds the laptop's LAN IPs
 ├── shared/                 used by the server AND the browser
 │   ├── scoring.config.js   ← all scoring knobs
@@ -104,10 +118,12 @@ polyspot/
 │   └── geo.js              coordinate systems: floorplan {x,y} meters, latlng {lat,lng}
 ├── public/
 │   ├── index.html, style.css
+│   ├── vendor/             Leaflet 1.9.4 (BSD-2), QR code generator (MIT)
 │   └── js/
 │       ├── app.js          hash router
 │       ├── map/index.js    map adapter interface + registry
 │       ├── map/floorplan.js  SVG floor-plan adapter (to-scale rectangle)
+│       ├── map/leaflet.js  satellite/street map adapter (campus, lat/lng)
 │       ├── compass.js      DeviceOrientation (iOS + Android)
 │       ├── photo.js        camera/file → resized JPEG
 │       ├── components.js   heading slider, difficulty chips, compass button…
@@ -123,24 +139,26 @@ polyspot/
 |---|---|---|
 | GET/POST | `/api/maps` | list / create a map |
 | GET/PUT | `/api/maps/:id` | read / update a map |
+| POST | `/api/maps/:id/import-osm` | refresh a campus map's building names from OpenStreetMap (keeps your own labels) |
 | GET/POST | `/api/rounds` | list rounds (without the answer) / create (photo as a data URL) |
 | GET | `/api/rounds/today?date=YYYY-MM-DD` | newest round released on that date |
 | GET/DELETE | `/api/rounds/:id` | |
 | GET/POST | `/api/rounds/:id/guesses` | history (+ answer once guessed) / submit `{ pos, heading }` |
 
-### Swapping in a real campus map
+### Map types
 
-Views never touch SVG or coordinates directly. They only call the map adapter interface, which is documented in `public/js/map/index.js`. Scoring only calls `shared/geo.js`, which already has a tested `latlng` system (haversine distance, compass bearing, span from bounds). To add Leaflet:
+Views never touch SVG or Leaflet directly. They call the map adapter interface in `public/js/map/index.js`, and scoring only calls `shared/geo.js`. Each map's `type` picks both:
 
-1. Create `public/js/map/leaflet.js` with the same methods (`setMap`, `setPoses`, `setLines`, `editPose`, `pickPoint`, `stopEditing`, `destroy`) using Leaflet markers. Use tap to place and a draggable handle to aim, since dragging the map pans it.
-2. Register it as `latlng` in `public/js/map/index.js`.
-3. Let `cleanMap` in `src/app.js` accept `type: 'latlng'` with `bounds: { sw, ne }`, then add a campus map. Headings are then real compass bearings, so the phone compass works without the alignment step.
+| `type` | Adapter | Positions | Heading 0° |
+|---|---|---|---|
+| `floorplan` | `map/floorplan.js` (SVG) | `{ x, y }` meters from the top-left corner | top of the plan |
+| `latlng` | `map/leaflet.js` (Leaflet) | `{ lat, lng }` | true north |
 
-The scoring scale picks up the campus size on its own (diagonal × 0.15, so a few hundred meters for CPP).
+A `latlng` map has a play area, `bounds: { sw, ne }`. To add another real place (say, a second campus), create one with the API or copy the campus entry in `data/db.json` with new bounds.
 
 ## Suggested next steps
 
-1. **Real campus map:** add a Leaflet + OpenStreetMap adapter (steps above), with CPP bounds and building labels as features.
+1. **Offline campus map:** cache the satellite tiles for the play area on the laptop, so the campus works without internet.
 2. **Daily release:** hide rounds dated in the future from players, allow one scored guess per day per player (practice guesses unscored), and add a countdown to the next round. `date` is already stored and `/api/rounds/today` exists.
 3. **Players and leaderboard:** start with a nickname stored on the phone (no accounts), then daily/weekly leaderboards and streaks.
 4. **Multiplayer:** add a room code, then everyone guesses the same round on their own phone, and results show all guesses together (WebSocket or polling).

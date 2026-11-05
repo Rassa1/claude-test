@@ -39,5 +39,13 @@ export function openStore(dataDir, seedDir) {
   db.rounds ??= [];
   db.guesses ??= [];
 
+  // Maps added to the seed later (e.g. the campus map) are added to existing data too, in seed order.
+  const seedMaps = JSON.parse(fs.readFileSync(path.join(seedDir, 'db.json'), 'utf8')).maps || [];
+  let added = false;
+  seedMaps.forEach((m, i) => {
+    if (!db.maps.some(x => x.id === m.id)) { db.maps.splice(i, 0, m); added = true; }
+  });
+  if (added) write(db);
+
   return { db, photosDir, save: () => write(db) };
 }

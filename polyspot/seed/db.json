@@ -1,6 +1,27 @@
 {
   "maps": [
     {
+      "id": "campus",
+      "type": "latlng",
+      "name": "Cal Poly Pomona campus",
+      "units": "ft",
+      "bounds": {
+        "sw": {
+          "lat": 34.048,
+          "lng": -117.832
+        },
+        "ne": {
+          "lat": 34.066,
+          "lng": -117.808
+        }
+      },
+      "topBearing": 0,
+      "autoImportOsm": true,
+      "features": [],
+      "createdAt": "2026-11-05T00:00:00.000Z",
+      "updatedAt": "2026-11-05T00:00:00.000Z"
+    },
+    {
       "id": "dorm",
       "type": "floorplan",
       "name": "My dorm room",
@@ -9,11 +30,46 @@
       "length": 4.572,
       "topBearing": null,
       "features": [
-        { "id": "door", "label": "Door", "pos": { "x": 0.762, "y": 4.572 } },
-        { "id": "bed", "label": "Bed", "pos": { "x": 0.5029, "y": 1.0973 } },
-        { "id": "desk", "label": "Desk", "pos": { "x": 3.3071, "y": 0.8382 } },
-        { "id": "window", "label": "Window", "pos": { "x": 1.8288, "y": 0 } },
-        { "id": "closet", "label": "Closet", "pos": { "x": 3.3528, "y": 3.6576 } }
+        {
+          "id": "door",
+          "label": "Door",
+          "pos": {
+            "x": 0.762,
+            "y": 4.572
+          }
+        },
+        {
+          "id": "bed",
+          "label": "Bed",
+          "pos": {
+            "x": 0.5029,
+            "y": 1.0973
+          }
+        },
+        {
+          "id": "desk",
+          "label": "Desk",
+          "pos": {
+            "x": 3.3071,
+            "y": 0.8382
+          }
+        },
+        {
+          "id": "window",
+          "label": "Window",
+          "pos": {
+            "x": 1.8288,
+            "y": 0
+          }
+        },
+        {
+          "id": "closet",
+          "label": "Closet",
+          "pos": {
+            "x": 3.3528,
+            "y": 3.6576
+          }
+        }
       ],
       "createdAt": "2026-11-05T00:00:00.000Z",
       "updatedAt": "2026-11-05T00:00:00.000Z"
@@ -25,7 +81,13 @@
       "mapId": "dorm",
       "title": "Sample: inside the door",
       "photo": "sample-dorm.jpg",
-      "truth": { "pos": { "x": 0.9144, "y": 3.9624 }, "heading": 20 },
+      "truth": {
+        "pos": {
+          "x": 0.9144,
+          "y": 3.9624
+        },
+        "heading": 20
+      },
       "difficulty": "easy",
       "date": "today",
       "createdAt": "2026-11-05T00:00:00.000Z"

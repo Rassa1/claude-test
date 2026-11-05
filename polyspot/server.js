@@ -48,6 +48,7 @@ http.createServer(app).on('error', onError(PORT)).listen(PORT, HOST, () => {
   }
   lines.push('', `  Data: ${DATA_DIR}`, '');
   console.log(lines.join('\n'));
+  app.autoImportOsm(); // campus building names from OpenStreetMap, first run only
 });
 
 if (hasCerts) {

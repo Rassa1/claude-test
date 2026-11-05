@@ -28,7 +28,7 @@ export async function play(root, id) {
 
   // map pane
   const box = h('div', { class: 'map-box fill' });
-  const hint = h('p', { class: 'hint' }, 'Tap where the photographer stood, then drag toward where they faced.');
+  const hint = h('p', { class: 'hint' });
   const submit = h('button', { type: 'button', class: 'btn primary grow', disabled: true }, 'Submit guess');
   const heading = headingControl({ value: 0, onInput: deg => { guess.heading = deg; editor.set({ heading: deg }); } });
   const mapPane = h('section', { class: 'pane map-pane' },
@@ -47,13 +47,14 @@ export async function play(root, id) {
   root.append(wrap);
 
   const view = createMapView(box, map);
+  hint.textContent = view.hints.place;
   const editor = view.editPose({
     value: guess, color: 'var(--guess)', label: 'You',
     onChange: v => {
       guess = v;
       heading.set(v.heading);
       submit.disabled = !v.pos;
-      hint.textContent = 'Drag the arrow tip to aim, or the dot to move. Then submit.';
+      hint.textContent = view.hints.adjust;
     },
   });
 

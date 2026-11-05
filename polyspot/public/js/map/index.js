@@ -1,9 +1,8 @@
 // Map layer. Views talk only to the interface below, never to SVG or Leaflet directly.
 //
-// To add a real campus map later:
-//   1. add a coordinate system to /shared/geo.js (a `latlng` one is already there and tested),
-//   2. write an adapter (e.g. leaflet.js) that implements the same methods, and register it here.
-// Scoring, rounds, host/player/results views stay as they are.
+// Two adapters so far: floorplan.js (to-scale rectangle, { x, y } meters) and leaflet.js (satellite/street
+// map, { lat, lng }). Each map's `type` picks one; its coordinate system lives in /shared/geo.js.
+// Scoring, rounds, host/player/results views don't care which one is used.
 //
 // createMapView(container, map) → view
 //   view.setMap(map)                      redraw the base layer (outline, grid, labeled features)
@@ -14,15 +13,19 @@
 //                                         let the user place a position and aim a heading
 //   view.pickPoint(onPick)                the next tap on the map calls onPick(pos) (placing features)
 //   view.stopEditing()
+//   view.focus(positions)                 zoom to show these positions (results); no-op if the whole map fits
+//   view.hints = { place, adjust }        instructions matching the adapter's gestures
+//   view.currentBounds?.()                visible area as { sw, ne } (real-world maps only)
 //   view.destroy()
 //
 // Positions are whatever the map's coordinate system uses ({ x, y } meters here, { lat, lng } later);
 // headings are degrees clockwise, 0 = map up / north.
 import { createFloorplanView } from './floorplan.js';
+import { createLeafletView } from './leaflet.js';
 
 const adapters = {
   floorplan: createFloorplanView,
-  // latlng: createLeafletView,
+  latlng: createLeafletView,
 };
 
 export function createMapView(container, map) {

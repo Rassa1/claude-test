@@ -14,7 +14,9 @@ export async function host(root) {
     return;
   }
 
-  const state = { photo: null, map: maps[0], pos: null, heading: 0, difficulty: scoring.defaultDifficulty, date: today(), title: '' };
+  let lastMap = null;
+  try { lastMap = localStorage.getItem('polyspot.hostMap'); } catch {}
+  const state = { photo: null, map: maps.find(m => m.id === lastMap) || maps[0], pos: null, heading: 0, difficulty: scoring.defaultDifficulty, date: today(), title: '' };
   let view, editor;
 
   // 1. photo
@@ -34,7 +36,7 @@ export async function host(root) {
 
   // 2. truth on map
   const box = h('div', { class: 'map-box' });
-  const hint = h('p', { class: 'hint' }, 'Tap where you stood. Drag from there toward where the camera pointed.');
+  const hint = h('p', { class: 'hint' });
   const heading = headingControl({ value: 0, onInput: deg => { state.heading = deg; editor.set({ heading: deg }); } });
   const compass = compassControl({
     offset: () => state.map.topBearing ?? 0,
@@ -43,24 +45,28 @@ export async function host(root) {
   const compassNote = h('p', { class: 'small muted' });
   const mapSelect = maps.length > 1
     ? h('select', { 'aria-label': 'Map', onchange: e => useMap(maps.find(m => m.id === e.target.value)) },
-      maps.map(m => h('option', { value: m.id }, m.name)))
+      maps.map(m => h('option', { value: m.id, selected: m.id === state.map.id }, m.name)))
     : null;
 
   function useMap(map) {
     state.map = map;
     state.pos = null;
+    try { localStorage.setItem('polyspot.hostMap', map.id); } catch {}
     view?.destroy();
     view = createMapView(box, map);
+    hint.textContent = view.hints.place;
     editor = view.editPose({
       value: { pos: null, heading: state.heading }, color: 'var(--truth)', label: 'Camera',
       onChange: v => {
         state.pos = v.pos;
         state.heading = v.heading;
         heading.set(v.heading);
-        hint.textContent = 'Got it. Drag the arrow tip to re-aim, or the dot to move.';
+        hint.textContent = view.hints.adjust;
       },
     });
-    compassNote.textContent = map.topBearing == null
+    compassNote.textContent = map.type === 'latlng'
+      ? 'North is up on this map, so compass readings are used as they are.'
+      : map.topBearing == null
       ? 'Compass assumes the top of the map faces north. Set the real direction in Edit map → Compass alignment.'
       : `Top of this map faces ${Math.round(map.topBearing)}°.`;
   }
@@ -93,6 +99,7 @@ export async function host(root) {
 
   function done(round) {
     view.destroy();
+    view = null;
     main.replaceChildren(card(
       h('h2', {}, '✅ Round saved'),
       h('img', { class: 'preview', src: round.photoUrl, alt: '' }),

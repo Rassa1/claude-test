@@ -21,7 +21,7 @@ const app = document.getElementById('app');
 let cleanup = null;
 
 async function render() {
-  cleanup?.();
+  try { cleanup?.(); } catch (err) { console.error(err); } // never let a cleanup error block navigation
   cleanup = null;
   const route = routes.find(([re]) => re.test(location.hash));
   if (!route) return location.replace('#/');

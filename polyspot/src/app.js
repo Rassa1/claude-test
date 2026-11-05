@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { openStore, localDate } from './store.js';
 import scoring from '../shared/scoring.config.js';
 import { scoreGuess } from '../shared/scoring.js';
-import { clampPos, isValidPos, norm360 } from '../shared/geo.js';
+import { clampPos, isValidPos, mapSpan, norm360 } from '../shared/geo.js';
+import { fetchOsmFeatures } from './osm.js';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -98,24 +99,59 @@ export function createApp({ dataDir, seedDir = path.join(ROOT, 'seed'), info = (
     };
   }
 
+  const latLng = p => ({ lat: num(p?.lat), lng: num(p?.lng) });
+  const FEATURE_KINDS = ['building', 'parking', 'place', 'custom'];
+
   function cleanMap(b, prev) {
-    const units = b.units === 'm' ? 'm' : 'ft';
-    const width = num(b.width), length = num(b.length);
-    if (!(width >= 0.3 && width <= 5000 && length >= 0.3 && length <= 5000)) fail(400, 'Width and length must be between 0.3 m (1 ft) and 5 km');
+    const type = prev?.type || (b.type === 'latlng' ? 'latlng' : 'floorplan');
     const map = {
       id: prev?.id || newId(),
-      type: 'floorplan', // the only map type with an adapter so far
+      type,
       name: str(b.name, 60) || 'Untitled map',
-      units, width, length,
-      // Compass bearing the top edge of the map faces (null = not measured). Lets the phone compass set headings.
-      topBearing: Number.isFinite(num(b.topBearing)) ? norm360(num(b.topBearing)) : null,
+      units: b.units === 'm' ? 'm' : 'ft', // for showing distances
       createdAt: prev?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    map.features = (Array.isArray(b.features) ? b.features : []).slice(0, 50)
+    if (type === 'floorplan') {
+      const width = num(b.width), length = num(b.length);
+      if (!(width >= 0.3 && width <= 5000 && length >= 0.3 && length <= 5000)) fail(400, 'Width and length must be between 0.3 m (1 ft) and 5 km');
+      Object.assign(map, { width, length });
+      // Compass bearing the top edge of the map faces (null = not measured). Lets the phone compass set headings.
+      map.topBearing = Number.isFinite(num(b.topBearing)) ? norm360(num(b.topBearing)) : null;
+    } else {
+      // Real-world map: the play area is a lat/lng box; north is up.
+      const sw = latLng(b.bounds?.sw), ne = latLng(b.bounds?.ne);
+      const valid = [sw.lat, sw.lng, ne.lat, ne.lng].every(Number.isFinite) && sw.lat < ne.lat && sw.lng < ne.lng
+        && Math.abs(sw.lat) <= 85 && Math.abs(ne.lat) <= 85;
+      if (!valid) fail(400, 'Invalid play area');
+      map.bounds = { sw, ne };
+      if (mapSpan(map) > 50_000) fail(400, 'Play area is too big (max 50 km across)');
+      map.topBearing = 0;
+      map.autoImportOsm = !!b.autoImportOsm;
+    }
+    map.features = (Array.isArray(b.features) ? b.features : []).slice(0, 400)
       .filter(f => isValidPos(map, f?.pos))
-      .map(f => ({ id: str(f.id, 20) || newId(), label: str(f.label, 30) || 'Feature', pos: clampPos(map, f.pos) }));
+      .map(f => ({
+        id: str(f.id, 30) || newId(),
+        label: str(f.label, 60) || 'Feature',
+        kind: FEATURE_KINDS.includes(f.kind) ? f.kind : 'custom',
+        source: f.source === 'osm' ? 'osm' : 'user',
+        pos: clampPos(map, type === 'latlng' ? latLng(f.pos) : { x: num(f.pos.x), y: num(f.pos.y) }),
+      }));
     return map;
+  }
+
+  /** Replace a map's OpenStreetMap labels with fresh ones; labels you added yourself are kept. */
+  async function importOsm(mapId) {
+    const map = findMap(mapId);
+    if (map.type !== 'latlng') fail(400, 'Only real-world maps can import from OpenStreetMap');
+    let osm;
+    try { osm = await fetchOsmFeatures(map.bounds); } catch (err) { fail(502, err.message); }
+    const current = findMap(mapId); // may have been edited while we waited
+    current.features = [...osm, ...current.features.filter(f => f.source !== 'osm')];
+    current.osmImportedAt = new Date().toISOString();
+    store.save();
+    return { added: osm.length, map: current };
   }
 
   function cleanPose(map, b, what) {
@@ -146,10 +182,15 @@ export function createApp({ dataDir, seedDir = path.join(ROOT, 'seed'), info = (
       if (method === 'GET') return send(res, 200, map);
       if (method === 'PUT') {
         const next = cleanMap(await readJson(req), map);
+        if (map.osmImportedAt) next.osmImportedAt = map.osmImportedAt;
         db.maps[db.maps.indexOf(map)] = next;
         store.save();
         return send(res, 200, next);
       }
+    }
+
+    if ((m = p.match(/^\/api\/maps\/([\w-]+)\/import-osm$/)) && method === 'POST') {
+      return send(res, 200, await importOsm(m[1]));
     }
 
     // ── rounds ──
@@ -214,7 +255,7 @@ export function createApp({ dataDir, seedDir = path.join(ROOT, 'seed'), info = (
     fail(404, 'Not found');
   }
 
-  return async function handle(req, res) {
+  async function handle(req, res) {
     try {
       const url = new URL(req.url, 'http://local');
       let p;
@@ -230,5 +271,18 @@ export function createApp({ dataDir, seedDir = path.join(ROOT, 'seed'), info = (
       console.error(err);
       if (!res.headersSent) send(res, 500, { error: 'Server error' });
     }
+  }
+
+  /** Called by server.js at startup: fetch building names for campus maps that have none yet. */
+  handle.autoImportOsm = async (log = console.log) => {
+    for (const map of db.maps.filter(m => m.type === 'latlng' && m.autoImportOsm && !m.features.some(f => f.source === 'osm'))) {
+      try {
+        const { added } = await importOsm(map.id);
+        log(`  Loaded ${added} building/place names for "${map.name}" from OpenStreetMap.`);
+      } catch (err) {
+        log(`  Couldn't load building names for "${map.name}": ${err.message}. Will retry on next start (or Edit map → Import).`);
+      }
+    }
   };
+  return handle;
 }

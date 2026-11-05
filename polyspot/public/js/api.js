@@ -13,6 +13,7 @@ async function call(method, url, body) {
 export const api = {
   info: () => call('GET', '/api/info'),
   maps: () => call('GET', '/api/maps'),
+  importOsm: mapId => call('POST', `/api/maps/${mapId}/import-osm`),
   saveMap: map => (map.id ? call('PUT', `/api/maps/${map.id}`, map) : call('POST', '/api/maps', map)),
   rounds: () => call('GET', '/api/rounds'),
   today: date => call('GET', `/api/rounds/today?date=${encodeURIComponent(date)}`),

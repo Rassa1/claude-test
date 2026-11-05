@@ -30,6 +30,7 @@ export async function result(root, roundId, guessId) {
       { id: 'guess', pos: g.pos, heading: g.heading, color: 'var(--guess)', label: 'You' },
     ]);
     view.setLines([{ a: g.pos, b: truth.pos }]);
+    view.focus([g.pos, truth.pos]);
     hero.replaceChildren(
       h('div', { class: 'total' }, points(g.total)),
       h('div', { class: 'muted' }, `of ${points(g.max)} points`, g.multiplier !== 1 ? ` · includes ×${g.multiplier} difficulty bonus` : ''));

@@ -198,7 +198,12 @@ export function createFloorplanView(container, initialMap) {
   setMap(initialMap);
 
   return {
+    hints: {
+      place: 'Tap where the photographer stood, then drag toward where they faced.',
+      adjust: 'Drag the arrow tip to aim, or the dot to move. Then submit.',
+    },
     setMap,
+    focus() {}, // the whole room is always visible
     setPoses(list) { poses = list || []; drawPoses(); },
     setLines(list) { lines = list || []; drawLines(); },
     editPose({ value, color = 'var(--guess)', label = '', onChange } = {}) {
