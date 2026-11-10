@@ -20,7 +20,7 @@ python3 -m http.server 8000
    - An effect runs **while** its condition is true, or **once** when it turns on, optionally only if it had been off for N seconds (a startup animation that doesn't replay when you flick the lights while driving).
    - Describe each effect's animation in plain English (Claude interprets it on the claude.ai-hosted page; offline a keyword parser is used). Effects higher in the list draw on top; they can replace or overlay the ones below.
    - Simulator: click input wires on/off, “+30 s” to jump time, “Power-cycle ESP32” to test startup.
-3. **ESP32 code** – set data pins, LED chip, color order and power limit, then copy or download `taillight.ino`. It includes the button inputs (GPIO to GND, internal pull-ups) and uses the exact same math as the simulator.
+3. **ESP32 code** – pick the board on the Build tab (pins are labelled like the silkscreen, e.g. XIAO `D4`), set LED chip (incl. SK6812 RGBW, needs FastLED 3.9+), color order and power limit, then copy or download `taillight.ino`. It includes the button inputs (GPIO to GND, internal pull-ups) and uses the exact same math as the simulator.
 
 Animations: solid, off, sequential sweep, blink/hazard, brake flash, scanner, breathe, chase, color wave, rainbow, sparkle, scrolling text (one line across both lights or the same on each, 3×5 or 5×7 font), and custom formulas (`js/custom.js`).
 
@@ -32,7 +32,7 @@ Animations: solid, off, sequential sweep, blink/hazard, brake flash, scanner, br
 - `js/ai.js` – Claude interpretation (claude.ai artifact runtime) with keyword fallback
 - `js/custom.js` – formula language compiled to JS and C++
 - `js/font.js` – pixel fonts for scrolling text
-- `js/pins.js` – ESP32 pin list, conflict checks
+- `js/pins.js` – board pin maps (ESP32, XIAO ESP32-S3, ESP32-S3 DevKit, ESP32-C3, XIAO ESP32-C3), conflict checks
 - `js/codegen.js` – Arduino sketch generator
 - `js/app.js` – UI
 

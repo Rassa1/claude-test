@@ -49,6 +49,9 @@
       <h3>Rows <span class="muted small">(LED count · shift in mm · data line)</span></h3>
       <div id="rowTable" class="rowtable"></div>
 
+      <h3>Controller</h3>
+      <label>ESP32 board<select id="board"></select></label>
+
       <h3>Lights</h3>
       <label>How many taillights<select id="lights"><option value="both">Two lights (left + right, mirrored)</option><option value="left">Left light only</option><option value="right">Right light only</option></select></label>
 
@@ -121,7 +124,7 @@
     <aside class="panel">
       <h2>Hardware</h2>
       <div class="grid2">
-        <label>LED chip<select id="ledType"><option>WS2812B</option><option>WS2811</option><option>WS2813</option><option>WS2815</option><option>SK6812</option></select></label>
+        <label>LED chip<select id="ledType"><option>WS2812B</option><option>WS2811</option><option>WS2813</option><option>WS2815</option><option>SK6812</option><option value="SK6812_RGBW">SK6812 RGBW (4-channel)</option></select></label>
         <label>Color order<select id="colorOrder"><option>GRB</option><option>RGB</option><option>BRG</option><option>RBG</option><option>GBR</option><option>BGR</option></select></label>
         <label>Power limit (mA)<input type="number" id="maxMa" min="100" max="20000" step="100" /></label>
       </div>
@@ -135,7 +138,7 @@
         <li>Install the <b>Arduino IDE</b> and add ESP32 support (Boards Manager → “esp32” by Espressif).</li>
         <li>Library Manager → install <b>FastLED</b>.</li>
         <li>Paste the code into a new sketch (or open the downloaded .ino).</li>
-        <li>Tools → Board → your ESP32 board, pick the port, press Upload.</li>
+        <li>Tools → Board → your board (XIAO ESP32-S3 = “XIAO_ESP32S3”), pick the port, press Upload.</li>
         <li>Each input pin is ON when pulled to GND. For 12V car wires use an optocoupler per input (see the code comments).</li>
       </ol>
       <p class="warn">Check your local laws: rear lights generally must be red (amber for indicators) and can't flash, except signals. Rainbow/sparkle effects are for shows only.</p>

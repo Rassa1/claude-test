@@ -5,7 +5,7 @@ import { compileCustom } from './custom.js';
 import { generateSketch } from './codegen.js';
 import { buildScene, renderScene, newInputState, newEffectState, engineStep, totalMs } from './engine.js';
 import { interpret, getSample } from './ai.js';
-import { pinUsage, pinOptions, pinProblems, MAX_LED_OUTPUTS } from './pins.js';
+import { pinUsage, pinOptions, pinProblems, setBoard, freePin as boardFreePin, remapPins, currentBoard, pinName, BOARDS } from './pins.js';
 import { outColor } from './matrix.js';
 import { textColumns, resolveFont } from './font.js';
 import { lightCols } from './engine.js';
@@ -21,7 +21,6 @@ const fitText = (s, atLeast) => { if (s.type === 'text') s.duration = atLeast ? 
 
 const $ = (s) => document.querySelector(s);
 const STORE = 'taillight-studio-v3';
-const SAFE_PINS = [13, 14, 27, 26, 25, 33, 32, 4, 16, 17, 19, 21, 22, 23];
 
 // ---------------------------------------------------------------- state
 let uid = 1;
@@ -73,6 +72,8 @@ function load() {
 }
 let state = load() || { matrix: defaultMatrix(), ...defaultModel(), sel: 0 };
 state.matrix.lights ??= 'both';
+state.matrix.board ??= 'esp32';
+setBoard(state.matrix.board);
 state.matrix.outputs ??= [{ pinL: state.matrix.dataPin ?? 5, pinR: state.matrix.dataPinR ?? 18 }];
 state.matrix.rows.forEach((r) => { r.out ??= 0; if (r.out >= state.matrix.outputs.length) r.out = 0; });
 state.view ??= state.matrix.lights;
@@ -208,14 +209,13 @@ function renderOutputs() {
     root.appendChild(d);
   });
   const lines = (both ? 2 : 1) * m.outputs.length;
-  $('#addOut').disabled = lines + (both ? 2 : 1) > MAX_LED_OUTPUTS;
+  $('#addOut').disabled = m.outputs.length >= 8;
   const warn = pinProblems(m, state.inputs);
   if (m.outputs.some((_, k) => !(layout.outInfo[k]?.count))) warn.push('A data line has no rows – give it rows or remove it.');
   $('#buildWarn').innerHTML = warnHtml(warn);
 }
 function freePin(exclude = []) {
-  const used = new Set([...pinUsage(state.matrix, state.inputs).keys(), ...exclude]);
-  return [16, 17, 19, 21, 22, 23, 4, 32, 33, 13, 14, 25, 26, 27, 5, 18].find((p) => !used.has(p)) ?? 4;
+  return boardFreePin(pinUsage(state.matrix, state.inputs), 'led', exclude);
 }
 $('#addOut').onclick = () => {
   const m = state.matrix;
@@ -273,6 +273,15 @@ bc.addEventListener('pointermove', (ev) => {
 bc.addEventListener('pointerup', () => { if (drag) { drag = null; renderRowTable(); matrixChanged(); } });
 
 
+$('#board').innerHTML = Object.entries(BOARDS).map(([id, b]) => `<option value="${id}">${b.name}</option>`).join('');
+$('#board').value = state.matrix.board;
+$('#board').onchange = (e) => {
+  state.matrix.board = e.target.value;
+  setBoard(state.matrix.board);
+  remapPins(state.matrix, state.inputs);
+  renderOutputs(); renderInputs(); renderBar(); renderEditor(); save();
+  toast(`Pins updated for the ${currentBoard().name}`);
+};
 $('#lights').value = state.matrix.lights;
 $('#lights').onchange = (e) => {
   state.matrix.lights = e.target.value;
@@ -412,7 +421,7 @@ function renderInputs() {
 }
 $('#addIn').onclick = () => {
   const used = pinUsage(state.matrix, state.inputs);
-  state.inputs.push(mkInput('New input', SAFE_PINS.find((p) => !used.has(p)) ?? 15));
+  state.inputs.push(mkInput('New input', boardFreePin(used, 'in')));
   inputsChanged(true);
 };
 
@@ -722,9 +731,9 @@ function renderCode() {
   const sides = state.matrix.lights === 'both' ? 2 : 1;
   $('#codeInfo').textContent = `taillight.ino · ${n} LEDs × ${sides} light${sides > 1 ? 's' : ''} · ${state.inputs.length} inputs · ${state.effects.length} effects · ${sketch.split('\n').length} lines`;
   const usage = [...pinUsage(state.matrix, state.inputs)].sort((a, b) => a[0] - b[0]);
-  $('#pinTable').innerHTML = usage.map(([p, who]) => `<span class="p">GPIO ${p}</span><span class="w">${who.map((w) => String(w).replace(/[&<>]/g, '')).join(', ')}</span>`).join('');
+  $('#pinTable').innerHTML = usage.map(([p, who]) => `<span class="p">${pinName(p)}</span><span class="w">${who.map((w) => String(w).replace(/[&<>]/g, '')).join(', ')}</span>`).join('');
   $('#codeWarn').innerHTML = warnHtml(pinProblems(state.matrix, state.inputs));
-  const amps = (n * sides * 60) / 1000;
+  const amps = (n * sides * (/RGBW/.test(state.matrix.ledType) ? 80 : 60)) / 1000;
   $('#powerInfo').textContent = `Worst case (all white): ${amps.toFixed(1)} A. Code caps it at ${(state.matrix.maxMilliamps / 1000).toFixed(1)} A, so size your 5V supply for at least that.`;
 }
 function toast(msg) {
