@@ -220,3 +220,11 @@ label.chk { flex-direction: row; align-items: center; gap: 6px; align-self: end;
 .pm-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .pm-actions { display: flex; gap: 6px; align-items: center; }
 .ghost.danger:hover { border-color: #ff8a80; color: #ff8a80; }
+
+/* ---- power ---- */
+.pwrbadge { display: flex; gap: 6px; flex-wrap: wrap; }
+.pw { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.pw.awake, .pw.on { color: #9fd3a8; border-color: #2f5a3a; }
+.pw.sleep { color: #a9b8ff; border-color: #36407a; }
+.pw.boot { color: #f0b37e; border-color: #5a3f22; }
+.pw.off { color: var(--muted); }

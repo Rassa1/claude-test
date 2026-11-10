@@ -43,7 +43,7 @@ const xiaoC3 = [
 // parallel: how many LED data lines the chip's RMT hardware sends at the same time
 export const BOARDS = {
   esp32: { name: 'ESP32 (DevKit V1 / WROOM)', chip: 'ESP32', parallel: 8, pins: classic, defaultsLed: [5, 18, 16, 17], defaultsIn: [25, 26, 14, 27, 13, 33, 32, 4] },
-  xiao_s3: { name: 'Seeed XIAO ESP32-S3', chip: 'ESP32-S3', parallel: 4, pins: xiaoS3, defaultsLed: [1, 2, 7, 8], defaultsIn: [4, 5, 6, 9, 43, 44, 3] },
+  xiao_s3: { name: 'Seeed XIAO ESP32-S3', chip: 'ESP32-S3', parallel: 4, pins: xiaoS3, defaultsLed: [1, 2, 7, 8], defaultsIn: [4, 5, 6, 9, 3, 43, 44] },
   s3_devkit: { name: 'ESP32-S3 DevKit', chip: 'ESP32-S3', parallel: 4, pins: s3Devkit, defaultsLed: [4, 5, 6, 7], defaultsIn: [15, 16, 17, 18, 8, 9, 10, 11] },
   c3: { name: 'ESP32-C3 DevKit', chip: 'ESP32-C3', parallel: 2, pins: c3, defaultsLed: [4, 5, 6, 7], defaultsIn: [0, 1, 3, 10, 6, 7] },
   xiao_c3: { name: 'Seeed XIAO ESP32-C3', chip: 'ESP32-C3', parallel: 2, pins: xiaoC3, defaultsLed: [3, 4, 5, 6], defaultsIn: [7, 10, 21, 20, 2] },
@@ -57,6 +57,10 @@ export function setBoard(id) {
 }
 setBoard('esp32');
 export const currentBoard = () => board;
+// pins that can wake the chip from DEEP sleep (light sleep can wake on any pin)
+const CLASSIC_RTC = new Set([0, 2, 4, 12, 13, 14, 15, 25, 26, 27, 32, 33, 34, 35, 36, 39]);
+export const deepSleepSupported = () => board.chip !== 'ESP32-C3';
+export const canDeepWake = (pin) => (board.chip === 'ESP32' ? CLASSIC_RTC.has(pin) : board.chip === 'ESP32-S3' ? pin >= 0 && pin <= 21 : false);
 export const pinInfo = (pin) => INFO[pin];
 export const pinName = (pin) => (INFO[pin]?.label ? `${INFO[pin].label} (GPIO ${pin})` : `GPIO ${pin}`);
 
@@ -70,6 +74,7 @@ export function pinUsage(matrix, inputs) {
     if (lights !== 'left') add(o.pinR, `LEDs ${lights === 'both' ? 'R' : ''}${k + 1}`);
   });
   inputs.forEach((b) => add(b.pin, b.name));
+  if (matrix.power?.ledPower) add(matrix.power.ledPin, 'LED power');
   return use;
 }
 
@@ -91,6 +96,7 @@ export function remapPins(matrix, inputs) {
     if (lights !== 'left') { o.pinR = fix(o.pinR, 'led', taken); taken.add(o.pinR); }
   }
   for (const x of inputs) { x.pin = fix(x.pin, 'in', taken); taken.add(x.pin); }
+  if (matrix.power?.ledPower) { matrix.power.ledPin = fix(matrix.power.ledPin, 'led', taken); taken.add(matrix.power.ledPin); }
 }
 
 // <option>s for a pin <select>. `mine` = this control's own label (not a conflict with itself)
@@ -118,6 +124,16 @@ export function pinProblems(matrix, inputs) {
   }
   const lines = (matrix.lights === 'both' ? 2 : 1) * matrix.outputs.length;
   if (lines > board.parallel) out.push(`${lines} LED data lines: the ${board.chip} sends ${board.parallel} at once, the rest go out in turns (works, but lowers the frame rate).`);
+  const pw = matrix.power;
+  if (pw && pw.sleep === 'deep') {
+    if (!deepSleepSupported()) out.push(`Deep sleep isn't available on the ${board.chip} here – light sleep will be used.`);
+    else {
+      const wake = inputs.filter((x) => (pw.wake || []).includes(x.id));
+      wake.filter((x) => !canDeepWake(x.pin)).forEach((x) => out.push(`${x.name}: ${pinName(x.pin)} can't wake the ${board.chip} from deep sleep – move it or use light sleep.`));
+      if (board.chip === 'ESP32' && wake.length > 1) out.push(`The original ESP32 can only wake from deep sleep on ONE input (${wake[0].name}). Use light sleep to wake on all of them.`);
+    }
+  }
+  if (pw && pw.sleep !== 'none' && !(pw.wake || []).some((id) => inputs.some((x) => x.id === id))) out.push('Sleep is on but no input is set to wake it – it would never wake up.');
   inputs.forEach((b) => { if (INFO[b.pin] && !INFO[b.pin].pullup) out.push(`${b.name}: GPIO ${b.pin} has no internal pull-up – add a 10k resistor to 3.3V.`); });
   return out;
 }

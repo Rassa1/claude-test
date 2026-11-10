@@ -112,6 +112,7 @@
         <div class="seg-ctl" id="viewSel" role="group" aria-label="Lights shown">
           <button data-view="both">Both lights</button><button data-view="left">Left</button><button data-view="right">Right</button>
         </div>
+        <div id="pwrBadge" class="pwrbadge"></div>
         <div class="stage-top-right">
           <label class="inline-sm">Speed <select id="simSpeed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
           <span class="mono simclock" id="simClock" title="Time since the simulated ESP32 powered up">0:00</span>
@@ -157,6 +158,22 @@
         <label>Power limit (mA)<input type="number" id="maxMa" min="100" max="20000" step="100" /></label>
       </div>
       <p class="muted" id="powerInfo"></p>
+      <h3>Power &amp; sleep</h3>
+      <label>When nothing is on<select id="pwSleep"></select></label>
+      <div id="pwSleepOpts">
+        <label class="sm-top">Go to sleep after (seconds)<input type="number" id="pwAfter" min="5" max="3600" step="5"></label>
+        <div class="condlabel">Wake up when these turn on</div>
+        <div class="conds" id="pwWake"></div>
+      </div>
+      <label class="chk sm-top"><input type="checkbox" id="pwLed"> The ESP switches the LED strip's power (relay, MOSFET or the buck converter's EN pin)</label>
+      <div id="pwLedOpts" class="grid2 sm-top">
+        <label>Switch pin<select id="pwLedPin"></select></label>
+        <label>Strip is ON when the pin is<select id="pwLedLevel"><option value="high">HIGH (most MOSFETs, buck EN)</option><option value="low">LOW (most relay boards)</option></select></label>
+        <label>Wait after power-on (ms)<input type="number" id="pwUp" min="0" max="2000" step="5"></label>
+        <label>Keep powered after last effect (s)<input type="number" id="pwKeep" min="0" max="600" step="0.5"></label>
+      </div>
+      <p class="muted small-p sm-top">LED strips draw ~1 mA per LED even when dark, so on a permanent 12V feed switch their power off. Switch the 5V (+) side, not GND.</p>
+
       <h3>Testing</h3>
       <label class="chk"><input type="checkbox" id="debugSerial"> Print inputs &amp; effects to the Serial Monitor (115200 baud)</label>
       <div class="condlabel">Bench test: force these inputs ON <span class="muted small">(no wiring needed – untick before fitting to the car)</span></div>

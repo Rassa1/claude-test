@@ -5,7 +5,7 @@ import { compileCustom } from './custom.js';
 import { generateSketch } from './codegen.js';
 import { buildScene, renderScene, newInputState, newEffectState, engineStep, totalMs } from './engine.js';
 import { interpret, getSample, sanitizeSteps } from './ai.js';
-import { pinUsage, pinOptions, pinProblems, setBoard, freePin as boardFreePin, remapPins, currentBoard, pinName, BOARDS } from './pins.js';
+import { pinUsage, pinOptions, pinProblems, setBoard, freePin as boardFreePin, remapPins, currentBoard, pinName, pinInfo, BOARDS, deepSleepSupported, canDeepWake } from './pins.js';
 import { outColor } from './matrix.js';
 import { textColumns, resolveFont } from './font.js';
 import { readLib, writeLib, newProjectId, exportPayload, parseImport, STATUSES } from './projects.js';
@@ -92,6 +92,14 @@ function sanitizeProject(s) {
     outputs: (Array.isArray(m.outputs) && m.outputs.length ? m.outputs : [{ pinL: m.dataPin ?? 5, pinR: m.dataPinR ?? 18 }])
       .slice(0, 8).map((o) => ({ pinL: clampInt(o?.pinL, 0, 48, 5), pinR: clampInt(o?.pinR, 0, 48, 18) })),
   };
+  const p = m.power || {};
+  out.power = {
+    sleep: oneOf(p.sleep, ['none', 'light', 'deep'], 'none'),
+    sleepAfterS: clampNum(p.sleepAfterS, 5, 3600, 30),
+    wake: Array.isArray(p.wake) ? p.wake.filter((x) => typeof x === 'string').slice(0, 16) : null,
+    ledPower: !!p.ledPower, ledPin: clampInt(p.ledPin, 0, 48, 21), ledActiveLow: !!p.ledActiveLow,
+    powerUpMs: clampInt(p.powerUpMs, 0, 2000, 30), keepOnS: clampNum(p.keepOnS, 0, 600, 3),
+  };
   out.rows = m.rows.slice(0, 40).map((r) => ({ count: clampInt(r?.count, 1, 500, 18), offset: clampNum(r?.offset, -2000, 2000, 0), out: clampInt(r?.out, 0, out.outputs.length - 1, 0) }));
   const inputs = s.inputs.slice(0, 16).map((x, k) => ({
     id: str(x?.id, 40, 'i' + k), name: str(x?.name, 30, 'Input ' + (k + 1)), pin: clampInt(x?.pin, 0, 48, 4),
@@ -110,6 +118,7 @@ function sanitizeProject(s) {
     };
   });
   if (!effects.length) return null;
+  if (!out.power.wake) out.power.wake = inputs.map((x) => x.id);   // default: every input can wake it
   return { matrix: out, inputs, effects, sel: clampInt(s.sel, 0, effects.length - 1, 0), view: oneOf(s.view, ['both', 'left', 'right'], out.lights) };
 }
 function load() {
@@ -120,7 +129,7 @@ function load() {
 }
 // project library: the open project comes from there; older single-design saves become the first project
 let lib = readLib();
-let state = normalize(lib.projects[lib.current]?.data) || load() || { matrix: defaultMatrix(), ...defaultModel(), sel: 0 };
+let state = normalize(lib.projects[lib.current]?.data) || load() || normalize({ matrix: defaultMatrix(), ...defaultModel(), sel: 0 });
 if (!lib.projects[lib.current]) {
   lib.current = newProjectId();
   lib.projects[lib.current] = { name: 'My taillights', status: 'draft', updated: Date.now(), data: state };
@@ -380,7 +389,45 @@ function syncEngineStates() {
 }
 function powerCycle() {           // what the ESP32 sees after a restart
   inStateById = new Map(); fxStateById = new Map(); simNow = 0; previewFx = null;
+  pwr = newPowerState();
   syncEngineStates();
+}
+// simulated power management (mirrors the sketch: idle -> strip off -> sleep -> wake)
+const newPowerState = () => ({ asleep: false, bootUntil: 0, idleSince: null, stripOn: !state.matrix.power.ledPower, stripOnAt: 0 });
+let pwr = newPowerState();
+function powerStep(raws) {
+  const pw = state.matrix.power;
+  let sleepMode = pw.sleep;
+  if (sleepMode === 'deep' && !deepSleepSupported()) sleepMode = 'light';
+  const wake = state.inputs.map((x, k) => (pw.wake.includes(x.id) && (sleepMode !== 'deep' || canDeepWake(x.pin)) ? k : -1)).filter((k) => k >= 0);
+  if (sleepMode === 'none' || !wake.length) { pwr.asleep = false; sleepMode = 'none'; }
+  if (pwr.asleep) {
+    if (!wake.some((k) => raws[k])) return false;              // still asleep: the ESP isn't running
+    pwr.asleep = false; pwr.idleSince = null;
+    if (sleepMode === 'deep') {                                  // deep sleep = restart; "once" timers survive in RTC memory
+      pwr.bootUntil = simNow + 300;
+      inStateById = new Map(); syncEngineStates();
+    }
+  }
+  if (simNow < pwr.bootUntil) return false;
+  onMask = engineStep({ inputs: state.inputs, effects: state.effects }, inStates, fxStates, raws, simNow);
+  const idle = onMask === 0 && !fxStates.some((s) => s.active);
+  if (!idle) pwr.idleSince = null; else if (pwr.idleSince === null) pwr.idleSince = simNow;
+  if (pw.ledPower) {
+    const want = !idle || (pwr.stripOn && simNow - pwr.idleSince < pw.keepOnS * 1000);
+    if (want && !pwr.stripOn) pwr.stripOnAt = simNow;
+    pwr.stripOn = want;
+  } else pwr.stripOn = true;
+  if (sleepMode !== 'none' && idle && simNow - pwr.idleSince >= pw.sleepAfterS * 1000) { pwr.asleep = true; pwr.stripOn = !pw.ledPower; return false; }
+  return pwr.stripOn && (!pw.ledPower || simNow - pwr.stripOnAt >= pw.powerUpMs);
+}
+function powerBadge() {
+  const pw = state.matrix.power;
+  if (pw.sleep === 'none' && !pw.ledPower) return '';
+  if (simNow < pwr.bootUntil) return '<span class="pw boot">ESP waking (restart)…</span>';
+  if (pwr.asleep) return `<span class="pw sleep">ESP asleep (${pw.sleep === 'deep' && deepSleepSupported() ? 'deep' : 'light'})</span>${pw.ledPower ? '<span class="pw off">LED power off</span>' : ''}`;
+  const left = pwr.idleSince !== null && pw.sleep !== 'none' ? Math.max(0, Math.ceil(pw.sleepAfterS - (simNow - pwr.idleSince) / 1000)) : null;
+  return `<span class="pw awake">ESP awake${left !== null ? ` · sleeps in ${left}s` : ''}</span>${pw.ledPower ? `<span class="pw ${pwr.stripOn ? 'on' : 'off'}">LED power ${pwr.stripOn ? 'on' : 'off'}</span>` : ''}`;
 }
 
 function setView(v) {
@@ -482,7 +529,9 @@ function renderInputs() {
 }
 $('#addIn').onclick = () => {
   const used = pinUsage(state.matrix, state.inputs);
-  state.inputs.push(mkInput('New input', boardFreePin(used, 'in')));
+  const ni = mkInput('New input', boardFreePin(used, 'in'));
+  state.inputs.push(ni);
+  state.matrix.power.wake.push(ni.id);
   inputsChanged(true);
 };
 
@@ -749,13 +798,15 @@ function tick(ts) {
   simNow += dt * +$('#simSpeed').value;
   if (inStates.length !== state.inputs.length || fxStates.length !== state.effects.length) syncEngineStates();
   const raws = state.inputs.map((_, k) => rawSignal(k));
-  onMask = engineStep({ inputs: state.inputs, effects: state.effects }, inStates, fxStates, raws, simNow);
+  const lit = powerStep(raws);
   if (previewFx && simNow >= previewFx.until) previewFx = null;
 
   if ($('#tab-animate').classList.contains('active')) {
     const shown = fxStates.map((st, k) => (previewFx && state.effects[k].id === previewFx.id ? { active: true, since: previewFx.since } : st));
     const { colors, act } = renderScene(scene, state.effects, shown, simNow);
-    drawLeds(sc, scene, colors, { pad: 36 });
+    drawLeds(sc, scene, lit || previewFx ? colors : null, { pad: 36 });
+    const badge = powerBadge();
+    if ($('#pwrBadge').innerHTML !== badge) $('#pwrBadge').innerHTML = badge;
     const sig = onMask + ':' + act.map((a) => (a ? 1 : 0)).join('');
     if (sig !== lastSig) {
       lastSig = sig;
@@ -798,6 +849,7 @@ function renderCode() {
     ...pinProblems(state.matrix, state.inputs),
   ]);
   $('#debugSerial').checked = state.matrix.debugSerial !== false;
+  renderPower();
   const forced = new Set(state.matrix.benchForce || []);
   $('#benchForce').innerHTML = state.inputs.map((x) => `<button data-id="${x.id}" class="cond ${forced.has(x.id) ? 'on' : ''}">${forced.has(x.id) ? '● ' : ''}${esc(x.name)}</button>`).join('');
   document.querySelectorAll('#benchForce .cond').forEach((el) => (el.onclick = () => {
@@ -815,6 +867,43 @@ function toast(msg) {
   t.textContent = msg; t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 1500);
 }
+// ---------------------------------------------------------------- power settings
+function renderPower() {
+  const pw = state.matrix.power, deepOk = deepSleepSupported();
+  $('#pwSleep').innerHTML = `<option value="none">Never sleep</option><option value="light">Light sleep – wakes instantly, ~1 mA</option>${deepOk ? '<option value="deep">Deep sleep – ~0.02 mA, ~0.3 s to wake</option>' : ''}`;
+  $('#pwSleep').value = pw.sleep === 'deep' && !deepOk ? 'light' : pw.sleep;
+  $('#pwAfter').value = pw.sleepAfterS;
+  $('#pwSleepOpts').hidden = pw.sleep === 'none';
+  const wake = new Set(pw.wake);
+  $('#pwWake').innerHTML = state.inputs.map((x) => {
+    const bad = pw.sleep === 'deep' && deepOk && !canDeepWake(x.pin);
+    return `<button data-id="${x.id}" class="cond ${wake.has(x.id) ? 'on' : ''}" ${bad ? 'title="This pin can\'t wake it from deep sleep"' : ''}>${wake.has(x.id) ? '● ' : ''}${esc(x.name)}${bad ? ' ⚠' : ''}</button>`;
+  }).join('');
+  document.querySelectorAll('#pwWake .cond').forEach((el) => (el.onclick = () => {
+    const ids = new Set(pw.wake);
+    ids.has(el.dataset.id) ? ids.delete(el.dataset.id) : ids.add(el.dataset.id);
+    pw.wake = state.inputs.map((x) => x.id).filter((id) => ids.has(id));
+    save(); renderCode();
+  }));
+  $('#pwLed').checked = pw.ledPower;
+  $('#pwLedOpts').hidden = !pw.ledPower;
+  $('#pwLedPin').innerHTML = pinOptions(pw.ledPin, pinUsage(state.matrix, state.inputs), 'LED power', true);
+  $('#pwLedLevel').value = pw.ledActiveLow ? 'low' : 'high';
+  $('#pwUp').value = pw.powerUpMs;
+  $('#pwKeep').value = pw.keepOnS;
+}
+const pwSet = (fn) => (e) => { fn(state.matrix.power, e.target); save(); renderCode(); renderOutputs(); };
+$('#pwSleep').onchange = pwSet((pw, t) => { pw.sleep = t.value; });
+$('#pwAfter').onchange = pwSet((pw, t) => { pw.sleepAfterS = Math.max(5, Math.min(3600, +t.value || 30)); });
+$('#pwLed').onchange = pwSet((pw, t) => {
+  pw.ledPower = t.checked;
+  if (t.checked) { const use = pinUsage({ ...state.matrix, power: null }, state.inputs); if (use.has(pw.ledPin) || !pinInfo(pw.ledPin)) pw.ledPin = boardFreePin(use, 'led'); }
+});
+$('#pwLedPin').onchange = pwSet((pw, t) => { pw.ledPin = +t.value; });
+$('#pwLedLevel').onchange = pwSet((pw, t) => { pw.ledActiveLow = t.value === 'low'; });
+$('#pwUp').onchange = pwSet((pw, t) => { pw.powerUpMs = Math.max(0, Math.min(2000, +t.value | 0)); });
+$('#pwKeep').onchange = pwSet((pw, t) => { pw.keepOnS = Math.max(0, Math.min(600, +t.value || 0)); });
+
 $('#debugSerial').onchange = (e) => { state.matrix.debugSerial = e.target.checked; save(); renderCode(); };
 $('#copy').onclick = async () => {
   try { await navigator.clipboard.writeText(sketch); toast('Copied to clipboard'); }

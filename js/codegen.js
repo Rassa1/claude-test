@@ -2,7 +2,7 @@
 // simulator exactly: same animation math, same button/layer rules.
 import { ANIMS, DIRS, fmtF } from './animations.js';
 import { CPP_HELPERS } from './custom.js';
-import { currentBoard, pinName } from './pins.js';
+import { currentBoard, pinName, deepSleepSupported, canDeepWake } from './pins.js';
 import { SIDE_MASK, condMasks, totalMs, stepMs, lightCols } from './engine.js';
 
 const wrap = (arr, per = 20, indent = '  ') => {
@@ -40,6 +40,14 @@ export function generateSketch(matrix, layout, model) {
   const forceMask = inputs.reduce((m, x, k) => (forceIds.has(x.id) ? m | (1 << k) : m), 0) >>> 0;
   const debug = matrix.debugSerial !== false;
   const extra = Math.max(0, Math.min(1000, matrix.extraDark | 0));
+  // power management
+  const pw = matrix.power || {};
+  let sleepMode = { light: 1, deep: 2 }[pw.sleep] || 0;
+  if (sleepMode === 2 && !deepSleepSupported()) sleepMode = 1;
+  let wakeIns = inputs.filter((x) => (pw.wake || []).includes(x.id));
+  if (sleepMode === 2) wakeIns = wakeIns.filter((x) => canDeepWake(x.pin));
+  if (sleepMode && !wakeIns.length) sleepMode = 0;            // nothing could wake it: don't sleep
+  const ledPin = pw.ledPower ? (pw.ledPin | 0) : -1;
   const tctx = { nr: matrix.rows.length, wc: lightCols(layout), pair: lights === 'both' };
   const usesCustom = effects.some((b) => b.steps.some((s) => s.type === 'custom'));
   const inName = (id) => inputs.find((x) => x.id === id)?.name || '?';
@@ -110,7 +118,7 @@ ${btnDocs}
  */
 
 #include <FastLED.h>
-#include <math.h>
+#include <math.h>${sleepMode ? '\n#include "esp_sleep.h"\n#include "driver/gpio.h"' : ''}${sleepMode === 2 ? '\n#include "driver/rtc_io.h"\n#include <sys/time.h>' : ''}
 
 #define NUM_LEDS        ${n}           // per light
 #define LED_TYPE        ${chipType}${rgbw ? '        // RGBW strip: white channel driven via setRgbw() below' : ''}
@@ -124,6 +132,13 @@ ${btnDocs}
 #define NUM_SIDES       ${sideIds.length}
 #define NUM_INPUTS      ${Math.max(1, inputs.length)}
 #define NUM_EFFECTS     ${Math.max(1, effects.length)}
+// Power: 0 = never sleep, 1 = light sleep (wakes in <1 ms), 2 = deep sleep (lowest power, ~0.3 s to wake)
+#define SLEEP_MODE      ${sleepMode}
+#define SLEEP_AFTER_MS  ${Math.round((pw.sleepAfterS ?? 30) * 1000)}u      // sleep once nothing has been on for this long
+#define LED_POWER_PIN   ${ledPin}${ledPin >= 0 ? `            // ${pinName(ledPin)} switches the LED strip's power (relay / MOSFET / buck EN)` : '            // -1 = LED power is not switched by the ESP'}
+#define LED_POWER_ON    ${pw.ledActiveLow ? 'LOW' : 'HIGH'}
+#define LED_POWER_UP_MS ${pw.powerUpMs ?? 30}u         // wait this long after switching the strip on before sending data
+#define LED_KEEP_ON_MS  ${Math.round((pw.keepOnS ?? 3) * 1000)}u       // keep the strip powered this long after the last effect ends
 #define DEBUG_SERIAL    ${debug ? 1 : 0}           // 1 = print inputs/effects to the Serial Monitor (115200 baud)
 // BENCH TEST: inputs forced ON without any wiring (bit k = input k). Set to 0 for the car!
 #define BENCH_FORCE_ON  0x${forceMask.toString(16)}u${forceMask ? `   // forced: ${inputs.filter((x) => forceIds.has(x.id)).map((x) => cmt(x.name)).join(', ')}` : ''}
@@ -298,7 +313,88 @@ static void debugPrint(uint32_t now, uint32_t inMask) {
 #endif
 }
 
+// ---------------------------------------------------------------- power
+static const uint8_t WAKE_PINS[] = { ${wakeIns.map((x) => x.pin).join(', ') || '0'} };   // ${wakeIns.map((x) => cmt(x.name)).join(', ') || 'none'}
+#define NUM_WAKE ${wakeIns.length}
+bool stripOn = true, wasIdle = false;
+uint32_t stripOnAt = 0, idleSince = 0;
+
+static inline void setStripPower(bool on, uint32_t now) {
+#if LED_POWER_PIN >= 0
+  if (on == stripOn) return;
+  if (!on) FastLED.clear(true);                 // send black before cutting the power
+  digitalWrite(LED_POWER_PIN, on ? LED_POWER_ON : !LED_POWER_ON);
+  stripOn = on;
+  if (on) stripOnAt = now;
+#else
+  (void)on; (void)now;
+#endif
+}
+
+#if SLEEP_MODE == 2
+// Deep sleep restarts the chip, so the "once" effects' timers are kept in RTC memory
+RTC_DATA_ATTR bool rtcValid = false;
+RTC_DATA_ATTR bool rtcEverOn[NUM_EFFECTS];
+RTC_DATA_ATTR uint64_t rtcOffAtUs[NUM_EFFECTS];
+static uint64_t wallUs() { struct timeval tv; gettimeofday(&tv, NULL); return (uint64_t)tv.tv_sec * 1000000ULL + (uint64_t)tv.tv_usec; }
+static void restoreAfterDeepSleep() {
+  for (int k = 0; k < NUM_WAKE; k++) rtc_gpio_deinit((gpio_num_t)WAKE_PINS[k]);
+  if (!rtcValid) return;
+  uint64_t t = wallUs();
+  uint32_t now = millis();
+  for (int k = 0; k < NUM_EFFECTS; k++) {
+    fxEverOn[k] = rtcEverOn[k];
+    uint64_t agoMs = (t - rtcOffAtUs[k]) / 1000ULL;
+    fxOffSince[k] = now - (uint32_t)(agoMs > 0x7fffffffULL ? 0x7fffffffULL : agoMs);
+  }
+}
+#endif
+
+#if SLEEP_MODE
+static void goToSleep(uint32_t now) {
+  setStripPower(false, now);
+  FastLED.clear(true);
+#if DEBUG_SERIAL
+  Serial.println("Nothing on - going to sleep (the Serial Monitor may disconnect)");
+  Serial.flush();
+#endif
+#if SLEEP_MODE == 1
+  for (int k = 0; k < NUM_WAKE; k++) gpio_wakeup_enable((gpio_num_t)WAKE_PINS[k], GPIO_INTR_LOW_LEVEL);
+  esp_sleep_enable_gpio_wakeup();
+  esp_light_sleep_start();                     // ...sleeping until a wake input goes ON...
+  for (int k = 0; k < NUM_WAKE; k++) gpio_wakeup_disable((gpio_num_t)WAKE_PINS[k]);
+  wasIdle = false;
+#if DEBUG_SERIAL
+  Serial.println("Woke up");
+#endif
+#else
+  uint64_t t = wallUs();
+  for (int k = 0; k < NUM_EFFECTS; k++) { rtcEverOn[k] = fxEverOn[k]; rtcOffAtUs[k] = t - (uint64_t)(now - fxOffSince[k]) * 1000ULL; }
+  rtcValid = true;
+  uint64_t mask = 0;
+  for (int k = 0; k < NUM_WAKE; k++) {
+    mask |= 1ULL << WAKE_PINS[k];
+    rtc_gpio_pullup_en((gpio_num_t)WAKE_PINS[k]);       // keep the inputs pulled up while asleep
+    rtc_gpio_pulldown_dis((gpio_num_t)WAKE_PINS[k]);
+  }
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+#if CONFIG_IDF_TARGET_ESP32
+  esp_sleep_enable_ext0_wakeup((gpio_num_t)WAKE_PINS[0], 0);   // the original ESP32 wakes on one LOW pin only
+  (void)mask;
+#else
+  esp_sleep_enable_ext1_wakeup(mask, ESP_EXT1_WAKEUP_ANY_LOW);
+#endif
+  esp_deep_sleep_start();                      // never returns: the chip restarts when woken
+#endif
+}
+#endif
+
 void setup() {
+#if LED_POWER_PIN >= 0
+  pinMode(LED_POWER_PIN, OUTPUT);
+  digitalWrite(LED_POWER_PIN, !LED_POWER_ON);   // strip starts unpowered
+  stripOn = false;
+#endif
 #if DEBUG_SERIAL
   Serial.begin(115200);   // XIAO / S3 / C3: Tools > USB CDC On Boot must be "Enabled" to see this
 #endif
@@ -306,7 +402,13 @@ ${sideIds.map((s, k) => outs.map((o, j) => `  FastLED.addLeds<LED_TYPE, ${pinOf(
   FastLED.setMaxPowerInVoltsAndMilliamps(5, MAX_MILLIAMPS);
   FastLED.setBrightness(255);
   FastLED.clear(true);
+#if SLEEP_MODE == 2
+  restoreAfterDeepSleep();
+#endif
 #if DEBUG_SERIAL
+#if SLEEP_MODE == 2
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED)   // only on a real power-up, not a wake
+#endif
   delay(1500);            // give the Serial Monitor a moment to connect
   Serial.println();
   Serial.println("Taillight Studio sketch running");
@@ -327,6 +429,21 @@ void loop() {
   uint32_t inMask = updateInputs(now);
   updateEffects(inMask, now);
   debugPrint(now, inMask);
+
+#if SLEEP_MODE || LED_POWER_PIN >= 0
+  bool anyFx = false;
+  for (int k = 0; k < NUM_EFFECTS; k++) anyFx = anyFx || fxActive[k];
+  bool idle = inMask == 0 && !anyFx;
+  if (!idle) wasIdle = false;
+  else if (!wasIdle) { wasIdle = true; idleSince = now; }
+  setStripPower(!idle || (stripOn && now - idleSince < LED_KEEP_ON_MS), now);
+#if SLEEP_MODE
+  if (idle && now - idleSince >= SLEEP_AFTER_MS) { goToSleep(now); return; }
+#endif
+#if LED_POWER_PIN >= 0
+  if (!stripOn || now - stripOnAt < LED_POWER_UP_MS) return;   // strip unpowered or still starting up
+#endif
+#endif
 
   // work out which step each active effect is on
   bool act[NUM_EFFECTS];
