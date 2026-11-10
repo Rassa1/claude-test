@@ -19,9 +19,9 @@ function animCatalog() {
 }
 
 function buildPrompt(text, ctx) {
-  return `You convert a plain-English description of a car LED taillight animation into JSON for a simulator that also generates ESP32 code.
+  return `You convert a plain-English description of an LED animation for ${ctx.kind || 'a car LED taillight'} into JSON for a simulator that also generates ESP32 code.
 
-LIGHT: ${ctx.leds} LEDs per light in ${ctx.rows} rows, about ${ctx.cols} LEDs across (${ctx.widthCm} cm wide, ${ctx.heightCm} cm tall). There are two taillights (left and right, mirror images). This animation belongs to a button called "${ctx.name}" that drives: ${ctx.side} light(s). It ${ctx.repeat ? 'loops while active' : 'plays once and holds its last frame'}.
+LIGHT: ${ctx.leds} LEDs per light in ${ctx.rows} rows, about ${ctx.cols} LEDs across (${ctx.widthCm} cm wide, ${ctx.heightCm} cm tall). ${ctx.lightsDesc || ''} This animation belongs to a button called "${ctx.name}" that drives: ${ctx.side} light(s). It ${ctx.repeat ? 'loops while active' : 'plays once and holds its last frame'}.
 
 Return ONLY a JSON object:
 {"summary": "one short sentence describing what you made", "repeat": true|false, "steps": [STEP, ...]}
@@ -47,7 +47,7 @@ Formula language for "custom" (compiles to both JavaScript and C++, so follow it
 - Operators: + - * / ( ) < > <= >= == != and the ternary a ? b : c. No &&, ||, !, %, if, loops or other functions.
 Example custom code: "float head = fract(t / 1.2); float d = abs(o - head); r = clamp01(1 - d * 8); g = r * 0.15;"
 
-Prefer presets when they fit; use custom for anything else. Keep total length sensible (1-15 s). Unless the user asks for other colours, respect car conventions (red tail/brake, amber turn signals).
+Prefer presets when they fit; use custom for anything else. Keep total length sensible (1-15 s). ${ctx.conventions || ''}
 
 DESCRIPTION: ${text}`;
 }

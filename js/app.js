@@ -9,6 +9,7 @@ import { pinUsage, pinOptions, pinProblems, setBoard, freePin as boardFreePin, r
 import { outColor } from './matrix.js';
 import { textColumns, resolveFont } from './font.js';
 import { startTour, introSeen } from './tour.js';
+import { PROFILES, profileOf } from './profiles.js';
 import { readLib, writeLib, newProjectId, exportPayload, parseImport, STATUSES } from './projects.js';
 import { lightCols } from './engine.js';
 
@@ -33,23 +34,22 @@ function mkInput(name, pin, type = 'level', holdMs = 0, simPulse = false) {
 function mkFx(name, side, layer, repeat, prompt, trigger) {
   return { id: newId('e'), name, side, layer, repeat, prompt, steps: parseDescription(prompt), trigger: { kind: 'while', match: 'all', minOffMs: 0, cancel: false, conds: {}, ...trigger } };
 }
-function defaultModel() {
-  const run = mkInput('Running lights', 25), brake = mkInput('Brake', 26);
-  const L = mkInput('Left blinker', 14, 'level', 800, true), R = mkInput('Right blinker', 27, 'level', 800, true);
-  const sweep = 'amber sequential sweep outward, 3 times';
-  return {
-    inputs: [run, brake, L, R],
-    effects: [
-      mkFx('Hazards', 'both', 'overlay', true, sweep, { conds: { [L.id]: 'on', [R.id]: 'on' } }),
-      mkFx('Left turn', 'left', 'overlay', true, sweep, { conds: { [L.id]: 'on', [R.id]: 'off' } }),
-      mkFx('Right turn', 'right', 'overlay', true, sweep, { conds: { [R.id]: 'on', [L.id]: 'off' } }),
-      mkFx('Brake', 'both', 'replace', false, 'brake: flash red 4 times fast', { conds: { [brake.id]: 'on' } }),
-      mkFx('Startup', 'both', 'replace', false, 'red sweep from the center out once then red breathe for 2 seconds',
-        { kind: 'once', minOffMs: 30000, cancel: true, conds: { [run.id]: 'on' } }),
-      mkFx('Running', 'both', 'replace', true, 'dim red tail light', { conds: { [run.id]: 'on' } }),
-    ],
-  };
+// a fresh project for one of the project types (see profiles.js)
+function profileProject(id) {
+  const P = profileOf(id), m = { ...defaultMatrix(), ...P.matrix };
+  const rows = P.matrix.rows ?? 4;
+  const base = Math.max(1, Math.round((m.rowLengthCm / 100) * m.ledsPerMeter));
+  m.rows = Array.from({ length: rows }, () => ({ count: base, offset: 0, out: 0 }));
+  const ids = {};
+  const inputs = P.inputs.map((x) => { const inp = mkInput(x.name, x.pin, x.type || 'level', x.holdMs || 0, !!x.simPulse); ids[x.key] = inp.id; return inp; });
+  const effects = P.effects.map((e) => {
+    const conds = {};
+    for (const [k, c] of Object.entries(e.trigger?.conds || {})) conds[ids[k]] = c;
+    return mkFx(e.name, e.side || 'both', e.layer || 'replace', e.repeat !== false, e.prompt, { ...e.trigger, conds });
+  });
+  return { matrix: m, inputs, effects, sel: 0, profile: P === PROFILES[id] ? id : 'taillight' };
 }
+const defaultModel = () => profileProject('taillight');
 // older saves had "buttons" (one pin each) – turn each into an input + an effect
 function migrateButtons(buttons) {
   const inputs = [], effects = [];
@@ -115,12 +115,12 @@ function sanitizeProject(s) {
     return {
       id: str(e?.id, 40, 'e' + k), name: str(e?.name, 40, 'Effect ' + (k + 1)), side: oneOf(e?.side, ['both', 'left', 'right'], 'both'),
       layer: oneOf(e?.layer, ['replace', 'overlay'], 'replace'), repeat: e?.repeat !== false, prompt: typeof e?.prompt === 'string' ? e.prompt.slice(0, 500) : '',
-      steps, trigger: { kind: oneOf(t.kind, ['while', 'once'], 'while'), match: oneOf(t.match, ['all', 'any'], 'all'), minOffMs: clampInt(t.minOffMs, 0, 86400000, 0), cancel: !!t.cancel, conds },
+      steps, trigger: { kind: oneOf(t.kind, ['while', 'once', 'always'], 'while'), match: oneOf(t.match, ['all', 'any'], 'all'), minOffMs: clampInt(t.minOffMs, 0, 86400000, 0), cancel: !!t.cancel, conds },
     };
   });
   if (!effects.length) return null;
   if (!out.power.wake) out.power.wake = inputs.map((x) => x.id);   // default: every input can wake it
-  return { matrix: out, inputs, effects, sel: clampInt(s.sel, 0, effects.length - 1, 0), view: oneOf(s.view, ['both', 'left', 'right'], out.lights) };
+  return { matrix: out, inputs, effects, profile: Object.hasOwn(PROFILES, s.profile) ? s.profile : 'taillight', sel: clampInt(s.sel, 0, effects.length - 1, 0), view: oneOf(s.view, ['both', 'left', 'right'], out.lights) };
 }
 function load() {
   for (const key of [STORE, 'taillight-studio-v2']) {
@@ -130,7 +130,9 @@ function load() {
 }
 // project library: the open project comes from there; older single-design saves become the first project
 let lib = readLib();
-let state = normalize(lib.projects[lib.current]?.data) || load() || normalize({ matrix: defaultMatrix(), ...defaultModel(), sel: 0 });
+let state = normalize(lib.projects[lib.current]?.data) || load();
+const firstRun = !state;
+state ??= normalize(profileProject('taillight'));
 if (!lib.projects[lib.current]) {
   lib.current = newProjectId();
   lib.projects[lib.current] = { name: 'My taillights', status: 'draft', updated: Date.now(), data: state };
@@ -142,6 +144,7 @@ setBoard(state.matrix.board);
 state.matrix.outputs ??= [{ pinL: state.matrix.dataPin ?? 5, pinR: state.matrix.dataPinR ?? 18 }];
 state.matrix.rows.forEach((r) => { r.out ??= 0; if (r.out >= state.matrix.outputs.length) r.out = 0; });
 state.view ??= state.matrix.lights;
+const words = () => ({ ...profileOf(state.profile).words, vehicle: !!profileOf(state.profile).vehicle, pair: state.matrix.lights === 'both' });
 let layout = computeLayout(state.matrix);
 let scene = buildScene(layout, state.view, state.matrix.lights === 'both');
 let selRow = -1;
@@ -377,8 +380,9 @@ const selFx = () => state.effects[state.sel] || state.effects[0];
 const toHex = (c) => '#' + c.map((x) => Math.round(x).toString(16).padStart(2, '0')).join('');
 const fromHex = (h) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16));
 const fxColor = (b) => {
+  if (b.steps.some((x) => x.type === 'rainbow' || x.type === 'custom')) return '#c9a2ff';
   const s = b.steps.find((x) => x.color && x.type !== 'off');
-  return s ? toHex(s.color) : (b.steps.some((x) => x.type === 'rainbow' || x.type === 'custom') ? '#c9a2ff' : '#666666');
+  return s ? toHex(s.color) : '#666666';
 };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -439,6 +443,7 @@ function setView(v) {
     b.classList.toggle('on', b.dataset.view === v);
     b.disabled = state.matrix.lights !== 'both' && b.dataset.view !== state.matrix.lights;
   });
+  $('#viewSel').hidden = state.matrix.lights !== 'both';   // nothing to switch with one light
   save();
 }
 document.querySelectorAll('#viewSel button').forEach((b) => (b.onclick = () => setView(b.dataset.view)));
@@ -566,6 +571,7 @@ function triggerSummary(fx) {
     .map((x) => (t.conds[x.id] === 'off' ? 'not ' : '') + x.name);
   const cond = parts.length ? parts.join(t.match === 'any' ? ' or ' : ' + ') : 'no trigger set';
   const where = fx.side === 'both' ? '' : ` · ${fx.side} only`;
+  if (t.kind === 'always') return `Always on${where}`;
   if (t.kind === 'once') return `Once when ${cond}${t.minOffMs ? ` (if off ${Math.round(t.minOffMs / 1000)}s+)` : ''}${where}`;
   return `While ${cond}${where}`;
 }
@@ -598,9 +604,9 @@ function renderEditor() {
 
     <h3>Trigger</h3>
     <div class="grid2">
-      <label class="full2">Runs<select id="tKind"><option value="while">While the condition is true</option><option value="once">Once, when the condition turns on</option></select></label>
+      <label class="full2">Runs<select id="tKind"><option value="always">Always (whenever it has power)</option><option value="while">While the condition is true</option><option value="once">Once, when the condition turns on</option></select></label>
     </div>
-    <div class="condlabel">Condition <span class="muted small">click an input: ignore → ON → OFF</span></div>
+    <div class="condlabel" id="condLabel">Condition <span class="muted small">click an input: ignore → ON → OFF</span></div>
     <div class="conds" id="conds">${state.inputs.map((x) => {
       const c = t.conds[x.id] || 'ignore';
       return `<button data-id="${x.id}" class="cond ${c}">${c === 'on' ? '● ' : c === 'off' ? '○ not ' : ''}${esc(x.name)}</button>`;
@@ -627,10 +633,12 @@ function renderEditor() {
     <div id="steps"></div>
     <button id="addStep" class="ghost wide sm-top">+ Add step</button>
   </div>`;
+  $('#bSide').closest('label').hidden = state.matrix.lights !== 'both';
   $('#bSide').value = b.side; $('#bLayer').value = b.layer; $('#bRepeat').value = b.repeat ? '1' : '0';
   $('#tKind').value = t.kind; $('#tMatch').value = t.match;
   const showKind = () => {
     $('#wRepeat').hidden = t.kind === 'once';
+    for (const id of ['#condLabel', '#conds', '#tMatch']) { const el = $(id); (id === '#tMatch' ? el.closest('label') : el).hidden = t.kind === 'always'; }
     $('#wMinOff').hidden = $('#wCancel').hidden = t.kind !== 'once';
     $('#tExplain').textContent = explain(b);
   };
@@ -670,6 +678,7 @@ function renderEditor() {
 }
 function explain(fx) {
   const t = fx.trigger, s = triggerSummary(fx);
+  if (t.kind === 'always') return `Runs all the time the ESP is powered. ${fx.repeat ? 'Loops' : 'Plays once and holds the last frame'}. Put effects with triggers above it to override it.`;
   if (!Object.keys(t.conds).length) return 'Pick at least one input above, or this effect never runs.';
   if (t.kind === 'once') {
     return `Plays its steps one time when the condition turns on${t.minOffMs ? `, but only if it had been off for ${Math.round(t.minOffMs / 1000)} s or more (or since the ESP32 powered up)` : ''}${t.cancel ? '. Stops early if the condition turns off' : ''}. Use "+30 s" and "Power-cycle ESP32" above the lights to test it.`;
@@ -688,13 +697,15 @@ async function generate(b) {
       leds: layout.leds.length, rows: state.matrix.rows.length,
       widthCm: ((layout.maxX - layout.minX) / 10).toFixed(1), heightCm: ((layout.maxY - layout.minY) / 10).toFixed(1),
       cols: Math.round((layout.maxX - layout.minX) / layout.pitch) + 1,
-      name: b.name, side: b.side, repeat: b.trigger.kind === 'while' && b.repeat,
+      kind: words().ai, conventions: words().conventions,
+      lightsDesc: state.matrix.lights === 'both' ? 'There are two of them (left and right, mirror images).' : 'There is one.',
+      name: b.name, side: b.side, repeat: b.trigger.kind !== 'once' && b.repeat,
     };
     const res = await interpret(text, ctx, aiCtl.signal);
     if (selFx() !== b) return;
     b.steps = res.steps;
     b.steps.forEach((x) => fitText(x, res.via === 'ai'));
-    if (res.repeat !== null && b.trigger.kind === 'while') b.repeat = res.repeat;
+    if (res.repeat !== null && b.trigger.kind !== 'once') b.repeat = res.repeat;
     renderEditor();
     setStatus(res.via === 'ai' ? '✦ ' + (res.summary || 'Done.') : res.note, res.via === 'ai' ? 'ai' : 'warn');
     fxChanged();
@@ -710,7 +721,7 @@ function setStatus(msg, cls = '') { const el = $('#aiStatus'); if (el) { el.text
 
 // play one effect now, regardless of its trigger
 function preview(b) {
-  const loops = b.trigger.kind === 'while' && b.repeat;
+  const loops = b.trigger.kind !== 'once' && b.repeat;
   previewFx = { id: b.id, since: simNow, until: simNow + Math.min(totalMs(b) * (loops ? 2 : 1) + (loops ? 0 : 800), 15000) };
 }
 
@@ -838,7 +849,7 @@ function highlight(src) {
     (m, c, p, k, n) => c ? `<span class="c">${c}</span>` : p ? `<span class="p">${p}</span>` : k ? `<span class="k">${k}</span>` : `<span class="n">${n}</span>`);
 }
 function renderCode() {
-  sketch = generateSketch(state.matrix, layout, { inputs: state.inputs, effects: state.effects });
+  sketch = generateSketch(state.matrix, layout, { inputs: state.inputs, effects: state.effects, words: words() });
   $('#code').innerHTML = highlight(sketch);
   const n = layout.leds.length;
   const sides = state.matrix.lights === 'both' ? 2 : 1;
@@ -987,12 +998,25 @@ $('#pmCopy').onclick = () => {
   openProject(id);
 };
 $('#pmExport').onclick = () => { flushSave(); exportProject(lib.projects[lib.current]); };
-$('#pmNew').onclick = () => {
-  flushSave();
-  const id = newProjectId();
-  lib.projects[id] = { name: 'New project', status: 'draft', updated: Date.now(), data: { matrix: defaultMatrix(), ...defaultModel(), sel: 0 } };
-  openProject(id);
-};
+$('#pmNew').onclick = () => { $('#projModal').hidden = true; openTypePicker(false); };
+
+// ---------------------------------------------------------------- project type picker
+function openTypePicker(first) {
+  $('#tpCards').innerHTML = Object.entries(PROFILES).map(([id, p]) => `<button class="tp-card" data-id="${id}"><span class="tp-name">${p.name}</span><span class="tp-blurb">${p.blurb}</span></button>`).join('');
+  $('#tpTitle').textContent = first ? 'What are you building?' : 'New project: what are you building?';
+  $('#tpClose').textContent = first ? 'Skip – start with car taillights' : 'Cancel';
+  document.querySelectorAll('#tpCards .tp-card').forEach((b) => (b.onclick = () => {
+    flushSave();
+    const P = PROFILES[b.dataset.id];
+    const data = normalize(profileProject(b.dataset.id));
+    if (first) { lib.projects[lib.current] = { name: P.projectName, status: 'draft', updated: Date.now(), data }; writeLib(lib); try { localStorage.removeItem(STORE); } catch {} location.reload(); return; }
+    const id = newProjectId();
+    lib.projects[id] = { name: P.projectName, status: 'draft', updated: Date.now(), data };
+    openProject(id);
+  }));
+  $('#tpClose').onclick = () => { $('#typeModal').hidden = true; if (first && !introSeen()) startTour('intro', showTab, words()); };
+  $('#typeModal').hidden = false;
+}
 $('#pmImport').onclick = () => $('#pmFile').click();
 $('#pmFile').onchange = async (e) => {
   const f = e.target.files[0];
@@ -1011,6 +1035,13 @@ $('#pmFile').onchange = async (e) => {
   }
 };
 renderProjectChip();
+$('#tab-build .stage-hint').textContent = words().stageHint;
+$('#legalWarn').hidden = !words().vehicle;
+if (!words().vehicle) {    // general projects: "copies" instead of left/right taillights
+  $('#lights').closest('label').firstChild.textContent = 'How many copies';
+  $('#lights').innerHTML = '<option value="left">One</option><option value="both">Two mirrored copies (e.g. left + right)</option><option value="right">One, mirrored</option>';
+  $('#lights').value = state.matrix.lights;
+}
 
 // ---------------------------------------------------------------- guides
 const activeTab = () => (document.querySelector('.tab.active')?.id || 'tab-build').replace('tab-', '');
@@ -1024,9 +1055,10 @@ document.addEventListener('click', () => { $('#guideMenu').hidden = true; $('#gu
 document.querySelectorAll('#guideMenu button').forEach((b) => (b.onclick = () => {
   $('#guideMenu').hidden = true;
   $('#projModal').hidden = true;
-  startTour(b.dataset.g === 'intro' ? 'intro' : activeTab(), showTab);
+  startTour(b.dataset.g === 'intro' ? 'intro' : activeTab(), showTab, words());
 }));
-if (!introSeen()) setTimeout(() => startTour('intro', showTab), 700);
+if (firstRun) openTypePicker(true);
+else if (!introSeen()) setTimeout(() => startTour('intro', showTab, words()), 700);
 
 // ---------------------------------------------------------------- boot
 window.addEventListener('resize', () => { if ($('#tab-build').classList.contains('active')) renderBuild(); });

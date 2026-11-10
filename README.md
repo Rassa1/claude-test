@@ -2,6 +2,9 @@
 
 Design an LED taillight matrix, describe an animation in plain English, watch it simulated, and get ready-to-flash ESP32 (FastLED) code.
 
+## Project types
+On first launch (and for every new project) you pick what you're building: **car taillights**, **bike / scooter light**, **LED matrix / sign**, **LED strip / room lighting**, **costume / wearable**, or **something else**. Each sets its own starting layout, inputs and effects, and tunes the hints, guides, AI instructions and code comments. Effects can also be **always on** (no trigger needed).
+
 ## Run it
 It's a static web page – no install. Because it uses JS modules, serve the folder instead of double-clicking the file:
 
@@ -41,6 +44,7 @@ The **Project** button (top right) keeps several designs in your browser, each l
 - `js/ai.js` – Claude interpretation (claude.ai artifact runtime) with keyword fallback
 - `js/custom.js` – formula language compiled to JS and C++
 - `js/font.js` – pixel fonts for scrolling text
+- `js/profiles.js` – project types (defaults + wording)
 - `js/tour.js` – intro + per-page guides
 - `js/projects.js` – project library, export/import
 - `js/pins.js` – board pin maps (ESP32, XIAO ESP32-S3, ESP32-S3 DevKit, ESP32-C3, XIAO ESP32-C3), conflict checks

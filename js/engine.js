@@ -49,7 +49,7 @@ export function stepAt(fx, elapsedMs) {
   const durs = fx.steps.map(stepMs);
   const tot = durs.reduce((a, b) => a + b, 0);
   if (!tot) return null;
-  const loop = fx.trigger.kind === 'while' && fx.repeat;
+  const loop = fx.trigger.kind !== 'once' && fx.repeat;
   const cyc = loop ? elapsedMs % tot : Math.min(elapsedMs, tot - 1);
   let k = 0, start = 0;
   while (k < durs.length - 1 && cyc >= start + durs[k]) { start += durs[k]; k++; }
@@ -91,6 +91,7 @@ export function newEffectState() { return { prev: false, active: false, since: 0
 
 export function updateEffect(fx, st, cond, now) {
   const t = fx.trigger;
+  if (t.kind === 'always') cond = true;          // runs whenever the ESP is powered
   if (t.kind === 'once') {
     if (cond && !st.prev) {
       if (!st.everOn || now - st.offSince >= (t.minOffMs | 0)) { st.active = true; st.since = now; }

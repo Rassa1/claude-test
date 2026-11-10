@@ -246,3 +246,10 @@ label.chk { flex-direction: row; align-items: center; gap: 6px; align-self: end;
 .tour-btns { display: flex; gap: 6px; margin-top: 12px; align-items: center; }
 .tour-btns span { flex: 1; }
 @media (prefers-reduced-motion: reduce) { .tour-spot { transition: none; } }
+
+/* ---- project type picker ---- */
+.tp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin: 12px 0; }
+.tp-card { display: flex; flex-direction: column; gap: 4px; text-align: left; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; color: var(--text); }
+.tp-card:hover, .tp-card:focus-visible { border-color: var(--accent); }
+.tp-name { font-weight: 600; }
+.tp-blurb { font-size: 12px; color: var(--muted); line-height: 1.4; }

@@ -4,14 +4,14 @@
 
 const DONE_KEY = 'taillight-intro-done';
 
-export const TOURS = {
+export const TOURS = (W) => ({
   intro: [
-    { title: 'Welcome to Taillight Studio', body: 'Design LED taillights, test how they react to the brake, blinkers and running lights, then get ready-to-flash ESP32 code. This 1-minute tour shows the basics. You can skip it any time.' },
+    { title: 'Welcome to Taillight Studio', body: `${W.welcome} This 1-minute tour shows the basics. You can skip it any time.` },
     { tab: 'build', target: '.tabs', title: 'Three steps', body: '<b>1 Build</b> the LED layout, <b>2</b> set up the <b>inputs &amp; effects</b> (what the lights do and when), <b>3</b> copy the <b>ESP32 code</b>.' },
-    { tab: 'build', target: '#buildCanvas', title: 'Your light', body: 'This is the left taillight seen from behind; the right one is its mirror image. Drag a row sideways to shift it.', place: 'center' },
+    { tab: 'build', target: '#buildCanvas', title: 'Your layout', body: W.stageHint, place: 'center' },
     { tab: 'build', target: '#rows', title: 'Size it', body: 'Set the rows, LEDs per meter and row length to match your strip. Shape buttons below make staggered, tapered or curved layouts.' },
-    { tab: 'animate', target: '#btnbar', title: 'Test like it’s on the car', body: 'These are the wires going into the ESP32. Click to switch one on, hold for a quick press. Try brake and both blinkers together.' },
-    { tab: 'animate', target: '#fxList', title: 'Effects', body: 'Each effect is an animation with a trigger, like “Hazards = Left AND Right blinker”. Higher in the list draws on top.' },
+    { tab: 'animate', target: '#btnbar', title: W.testTitle, body: W.testBody },
+    { tab: 'animate', target: '#fxList', title: 'Effects', body: `Each effect is an animation with a trigger, like ${W.vehicle ? '“Hazards = Left AND Right blinker”' : '“Rainbow while the Mode button is on”, or Always on'}. Higher in the list draws on top.` },
     { tab: 'animate', target: '#bPrompt', title: 'Describe it', body: 'Type what you want in plain English and press <b>Generate</b>. Then fine-tune the steps below.' },
     { tab: 'code', target: '#copy', title: 'Get the code', body: 'Copy the sketch into the Arduino IDE and upload it. Power, sleep and test options are on the right.' },
     { tab: 'code', target: '#projBtn', title: 'Projects', body: 'Keep test and official versions, make copies before experimenting, and export them as files.' },
@@ -19,7 +19,7 @@ export const TOURS = {
   ],
 
   build: [
-    { tab: 'build', target: '#buildCanvas', title: 'The layout view', body: 'Shows the left light from behind. <b>Drag</b> a row sideways to shift it; click a row to highlight it in the list. Coloured lines show how each data line is wired and the <b>OUT</b> dot marks its first LED.', place: 'center' },
+    { tab: 'build', target: '#buildCanvas', title: 'The layout view', body: (W.pair ? 'Shows the left light; the right one is its mirror image. ' : '') + '<b>Drag</b> a row sideways to shift it; click a row to highlight it in the list. Coloured lines show how each data line is wired and the <b>OUT</b> dot marks its first LED.', place: 'center' },
     { tab: 'build', target: '#rows', title: 'Rows and density', body: 'Number of rows, LEDs per meter (printed on your strip), the length of each row and the gap between rows. Changing the length or density resets every row’s LED count.' },
     { tab: 'build', target: '#shapes', title: 'Shapes', body: 'Quick layouts: staggered (alternate rows shifted half an LED), taper, slant, arc or a random shift. <b>Shape strength</b> sets how strong the effect is.' },
     { tab: 'build', target: '#rowTable', title: 'Fine-tune each row', body: 'Per row: number of LEDs, sideways shift in mm, and which data line it’s wired to. × removes the row.' },
@@ -40,8 +40,8 @@ export const TOURS = {
     { tab: 'animate', target: '#inList', title: 'Inputs', body: 'One per wire into the ESP32: pick its pin, whether it’s a wire (on while powered) or a push button (press = on/off), and a <b>hold time</b> so a pulsing blinker reads as one steady ON.' },
     { tab: 'animate', target: '#fxList', title: 'Effects', body: 'Click one to edit it. ↑↓ change priority (top draws over the rest). A green dot means it’s running right now.' },
     { tab: 'animate', target: '#bSide', title: 'Where it shows', body: 'Both lights, or only left/right (turn signals). <b>Replace</b> hides the effects below it; <b>lay lit LEDs on top</b> lets them show through dark LEDs.' },
-    { tab: 'animate', target: '#conds', title: 'Trigger condition', body: 'Click an input to cycle <b>ignore → ON → OFF</b>. Example: Left turn = Left blinker ON + Right blinker OFF, so it doesn’t clash with the hazards.' },
-    { tab: 'animate', target: '#tKind', title: 'While or once', body: '<b>While</b>: runs as long as the condition is true. <b>Once</b>: plays one time when it turns on. Great for a startup animation, with “only if it was off for N seconds” so it won’t replay while driving.' },
+    { tab: 'animate', target: '#conds', title: 'Trigger condition', body: 'Click an input to cycle <b>ignore → ON → OFF</b>. ' + (W.vehicle ? 'Example: Left turn = Left blinker ON + Right blinker OFF, so it doesn’t clash with the hazards.' : 'Combine several, e.g. Button A ON + Button B OFF.') },
+    { tab: 'animate', target: '#tKind', title: 'When it runs', body: '<b>Always</b>: whenever it has power. <b>While</b>: as long as the condition is true. <b>Once</b>: plays one time when it turns on, great for a startup animation, with “only if it was off for N seconds” so it won’t replay ' + (W.vehicle ? 'while driving.' : 'every time.') },
     { tab: 'animate', target: '#bPrompt', title: 'Describe the animation', body: 'Plain English, e.g. “amber sweep outward 3 times” or “scroll the text HELLO across both lights”. On claude.ai, AI reads it and can invent custom effects; elsewhere a keyword reader is used.' },
     { tab: 'animate', target: '#bPreview', title: 'Preview', body: 'Plays this effect now, ignoring its trigger.' },
     { tab: 'animate', target: '#steps', title: 'Steps', body: 'Each effect is a list of steps played in order. Change the type, colours, speed, direction or length. The playing step is outlined.' },
@@ -51,14 +51,14 @@ export const TOURS = {
     { tab: 'code', target: '#code', title: 'Your sketch', body: 'Complete Arduino code for your board. The comments at the top list every wire: LED data pins, input pins and how to connect them.', place: 'center' },
     { tab: 'code', target: '#copy', title: 'Copy or download', body: 'Paste it into a new Arduino IDE sketch, pick your board and port, and upload.' },
     { tab: 'code', target: '#ledType', title: 'LED hardware', body: 'Chip type (incl. SK6812 RGBW), colour order (if red shows as green, try another), and a current limit; the code dims everything to stay under it.' },
-    { tab: 'code', target: '#pwSleep', title: 'Sleep', body: 'On a permanent 12V feed the ESP32 should sleep when nothing is on. <b>Light sleep</b> wakes instantly (best for brakes); <b>deep sleep</b> uses less power but takes ~0.3 s to wake.' },
+    { tab: 'code', target: '#pwSleep', title: 'Sleep', body: 'On a battery or an always-on supply the ESP32 should sleep when nothing is on. <b>Light sleep</b> wakes instantly (best for brakes); <b>deep sleep</b> uses less power but takes ~0.3 s to wake.' },
     { tab: 'code', target: '#pwWake', title: 'Wake inputs', body: 'Which wires wake it up. Deep sleep can only wake on certain pins; you’ll get a warning if one can’t.' },
     { tab: 'code', target: '#pwLed', title: 'LED power switch', body: 'Strips use ~1 mA per LED even when dark. Let the ESP32 switch their power with a relay, MOSFET or the buck converter’s EN pin, on the 5V (+) side.' },
     { tab: 'code', target: '#debugSerial', title: 'Serial Monitor', body: 'Prints which inputs and effects are on (115200 baud). On XIAO/S3/C3 boards set Tools → USB CDC On Boot → Enabled.' },
-    { tab: 'code', target: '#benchForce', title: 'Bench test', body: 'Force inputs ON without wiring anything, handy on the desk. Turn it off before fitting it to the car.' },
+    { tab: 'code', target: '#benchForce', title: 'Bench test', body: 'Force inputs ON without wiring anything, handy on the desk. Turn it off before the final install.' },
     { tab: 'code', target: '#pinTable', title: 'Pin summary', body: 'Every pin in use and what it does. Conflicts and other problems show in orange below.' },
   ],
-};
+});
 
 // ---------------------------------------------------------------- engine
 let ui = null, steps = [], idx = 0, onTab = null, raf = 0;
@@ -139,9 +139,9 @@ function onKey(e) {
   else if (e.key === 'ArrowLeft') go(idx - 1, -1);
 }
 
-export function startTour(name, showTab) {
+export function startTour(name, showTab, words = {}) {
   end();
-  steps = TOURS[name] || [];
+  steps = TOURS(words)[name] || [];
   if (!steps.length) return;
   onTab = showTab;
   build();

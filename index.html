@@ -26,6 +26,15 @@
     </button>
   </header>
 
+  <div id="typeModal" class="modal" hidden>
+    <div class="modal-card tp" role="dialog" aria-modal="true" aria-labelledby="tpTitle">
+      <h2 id="tpTitle">What are you building?</h2>
+      <p class="muted small-p">This sets up a starting layout, inputs and effects, and tunes the wording and tips. You can change everything afterwards.</p>
+      <div id="tpCards" class="tp-cards"></div>
+      <div class="row-btns"><button id="tpClose" class="ghost sm">Cancel</button></div>
+    </div>
+  </div>
+
   <div id="projModal" class="modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="pmTitle">
       <div class="modal-head"><h2 id="pmTitle">Projects</h2><button id="pmClose" class="icon" title="Close">×</button></div>
@@ -197,7 +206,7 @@
         <li>Tools → Board → your board (XIAO ESP32-S3 = “XIAO_ESP32S3”), pick the port, press Upload.</li>
         <li>Each input pin is ON when pulled to GND. For 12V car wires use an optocoupler per input (see the code comments).</li>
       </ol>
-      <p class="warn">Check your local laws: rear lights generally must be red (amber for indicators) and can't flash, except signals. Rainbow/sparkle effects are for shows only.</p>
+      <p class="warn" id="legalWarn">Check your local laws: rear lights generally must be red (amber for indicators) and can't flash, except signals. Rainbow/sparkle effects are for shows only.</p>
     </aside>
   </main>
 
