@@ -275,6 +275,8 @@ bc.addEventListener('pointerup', () => { if (drag) { drag = null; renderRowTable
 
 $('#board').innerHTML = Object.entries(BOARDS).map(([id, b]) => `<option value="${id}">${b.name}</option>`).join('');
 $('#board').value = state.matrix.board;
+$('#extraDark').value = state.matrix.extraDark || 0;
+$('#extraDark').oninput = (e) => { state.matrix.extraDark = Math.max(0, Math.min(1000, +e.target.value | 0)); save(); };
 $('#board').onchange = (e) => {
   state.matrix.board = e.target.value;
   setBoard(state.matrix.board);

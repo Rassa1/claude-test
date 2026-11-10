@@ -39,6 +39,7 @@ export function generateSketch(matrix, layout, model) {
   const forceIds = new Set(matrix.benchForce || []);
   const forceMask = inputs.reduce((m, x, k) => (forceIds.has(x.id) ? m | (1 << k) : m), 0) >>> 0;
   const debug = matrix.debugSerial !== false;
+  const extra = Math.max(0, Math.min(1000, matrix.extraDark | 0));
   const tctx = { nr: matrix.rows.length, wc: lightCols(layout), pair: lights === 'both' };
   const usesCustom = effects.some((b) => b.steps.some((s) => s.type === 'custom'));
   const inName = (id) => inputs.find((x) => x.id === id)?.name || '?';
@@ -128,7 +129,19 @@ ${btnDocs}
 #define BENCH_FORCE_ON  0x${forceMask.toString(16)}u${forceMask ? `   // forced: ${inputs.filter((x) => forceIds.has(x.id)).map((x) => cmt(x.name)).join(', ')}` : ''}
 
 static const uint8_t SIDE_ID[NUM_SIDES] = { ${sideIds.join(', ')} };   // 0 = left, 1 = right
-CRGB leds[NUM_SIDES][NUM_LEDS];
+// Each data line is followed by EXTRA_DARK spare LEDs that are always sent black
+// (so a strip longer than the layout stays dark instead of showing random colours)
+#define EXTRA_DARK      ${extra}
+#define NUM_LINES       ${outs.length}
+static const uint16_t LINE_START[NUM_LINES] = { ${outs.map((o) => o.start).join(', ')} };
+#define BUF_LEDS        (NUM_LEDS + NUM_LINES * EXTRA_DARK)
+CRGB leds[NUM_SIDES][BUF_LEDS];
+
+static inline int bufIndex(int i) {        // layout LED index -> position in the leds[] buffer
+  int ln = 0;
+  while (ln < NUM_LINES - 1 && i >= LINE_START[ln + 1]) ln++;
+  return i + ln * EXTRA_DARK;
+}
 
 // Normalised LED positions (0..255) of the LEFT light in wiring order: U = left->right, V = top->bottom
 // Data lines split this array: ${outs.map((o) => `line ${o.k + 1} = LEDs ${o.start}..${o.start + o.count - 1}`).join(', ')}
@@ -289,7 +302,7 @@ void setup() {
 #if DEBUG_SERIAL
   Serial.begin(115200);   // XIAO / S3 / C3: Tools > USB CDC On Boot must be "Enabled" to see this
 #endif
-${sideIds.map((s, k) => outs.map((o) => `  FastLED.addLeds<LED_TYPE, ${pinOf(o, s)}, COLOR_ORDER>(leds[${k}] + ${o.start}, ${o.count})${rgbw ? '.setRgbw(RgbwDefault())' : ''};   // ${s ? 'right' : 'left'} light, line ${o.k + 1}: row${o.rows.length > 1 ? 's' : ''} ${rowList(o.rows)}`).join('\n')).join('\n')}
+${sideIds.map((s, k) => outs.map((o, j) => `  FastLED.addLeds<LED_TYPE, ${pinOf(o, s)}, COLOR_ORDER>(leds[${k}] + ${o.start + j * extra}, ${o.count + extra})${rgbw ? '.setRgbw(RgbwDefault())' : ''};   // ${s ? 'right' : 'left'} light, line ${o.k + 1}: row${o.rows.length > 1 ? 's' : ''} ${rowList(o.rows)}`).join('\n')).join('\n')}
   FastLED.setMaxPowerInVoltsAndMilliamps(5, MAX_MILLIAMPS);
   FastLED.setBrightness(255);
   FastLED.clear(true);
@@ -341,7 +354,7 @@ void loop() {
         CRGB x = renderPixel(b, curStep[b], i, u, v, o, side, curT[b]);
         if (!EFFECT_CFG[b].overlay || x.r || x.g || x.b) c = x;
       }
-      leds[s][i] = c;
+      leds[s][bufIndex(i)] = c;
     }
   }
   FastLED.show();
