@@ -732,7 +732,19 @@ function renderCode() {
   $('#codeInfo').textContent = `taillight.ino · ${n} LEDs × ${sides} light${sides > 1 ? 's' : ''} · ${state.inputs.length} inputs · ${state.effects.length} effects · ${sketch.split('\n').length} lines`;
   const usage = [...pinUsage(state.matrix, state.inputs)].sort((a, b) => a[0] - b[0]);
   $('#pinTable').innerHTML = usage.map(([p, who]) => `<span class="p">${pinName(p)}</span><span class="w">${who.map((w) => String(w).replace(/[&<>]/g, '')).join(', ')}</span>`).join('');
-  $('#codeWarn').innerHTML = warnHtml(pinProblems(state.matrix, state.inputs));
+  $('#codeWarn').innerHTML = warnHtml([
+    ...(state.matrix.benchForce?.length ? ['Bench test is on: some inputs are forced ON in this code. Turn it off before fitting to the car.'] : []),
+    ...pinProblems(state.matrix, state.inputs),
+  ]);
+  $('#debugSerial').checked = state.matrix.debugSerial !== false;
+  const forced = new Set(state.matrix.benchForce || []);
+  $('#benchForce').innerHTML = state.inputs.map((x) => `<button data-id="${x.id}" class="cond ${forced.has(x.id) ? 'on' : ''}">${forced.has(x.id) ? '● ' : ''}${esc(x.name)}</button>`).join('');
+  document.querySelectorAll('#benchForce .cond').forEach((el) => (el.onclick = () => {
+    const ids = new Set(state.matrix.benchForce || []);
+    ids.has(el.dataset.id) ? ids.delete(el.dataset.id) : ids.add(el.dataset.id);
+    state.matrix.benchForce = state.inputs.map((x) => x.id).filter((id) => ids.has(id));
+    save(); renderCode();
+  }));
   const amps = (n * sides * (/RGBW/.test(state.matrix.ledType) ? 80 : 60)) / 1000;
   $('#powerInfo').textContent = `Worst case (all white): ${amps.toFixed(1)} A. Code caps it at ${(state.matrix.maxMilliamps / 1000).toFixed(1)} A, so size your 5V supply for at least that.`;
 }
@@ -742,6 +754,7 @@ function toast(msg) {
   t.textContent = msg; t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 1500);
 }
+$('#debugSerial').onchange = (e) => { state.matrix.debugSerial = e.target.checked; save(); renderCode(); };
 $('#copy').onclick = async () => {
   try { await navigator.clipboard.writeText(sketch); toast('Copied to clipboard'); }
   catch { const r = document.createRange(); r.selectNodeContents($('#code')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Press Ctrl/Cmd+C to copy'); }

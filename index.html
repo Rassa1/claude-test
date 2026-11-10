@@ -129,6 +129,10 @@
         <label>Power limit (mA)<input type="number" id="maxMa" min="100" max="20000" step="100" /></label>
       </div>
       <p class="muted" id="powerInfo"></p>
+      <h3>Testing</h3>
+      <label class="chk"><input type="checkbox" id="debugSerial"> Print inputs &amp; effects to the Serial Monitor (115200 baud)</label>
+      <div class="condlabel">Bench test: force these inputs ON <span class="muted small">(no wiring needed – untick before fitting to the car)</span></div>
+      <div class="conds" id="benchForce"></div>
       <h3>Pins</h3>
       <div id="pinTable" class="pintable"></div>
       <div id="codeWarn" class="pinwarn"></div>

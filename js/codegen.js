@@ -36,6 +36,9 @@ export function generateSketch(matrix, layout, model) {
   const rgbw = /RGBW/.test(matrix.ledType);
   const chipType = rgbw ? matrix.ledType.replace(/_?RGBW$/, '') : matrix.ledType;
   const board = currentBoard();
+  const forceIds = new Set(matrix.benchForce || []);
+  const forceMask = inputs.reduce((m, x, k) => (forceIds.has(x.id) ? m | (1 << k) : m), 0) >>> 0;
+  const debug = matrix.debugSerial !== false;
   const tctx = { nr: matrix.rows.length, wc: lightCols(layout), pair: lights === 'both' };
   const usesCustom = effects.some((b) => b.steps.some((s) => s.type === 'custom'));
   const inName = (id) => inputs.find((x) => x.id === id)?.name || '?';
@@ -120,6 +123,9 @@ ${btnDocs}
 #define NUM_SIDES       ${sideIds.length}
 #define NUM_INPUTS      ${Math.max(1, inputs.length)}
 #define NUM_EFFECTS     ${Math.max(1, effects.length)}
+#define DEBUG_SERIAL    ${debug ? 1 : 0}           // 1 = print inputs/effects to the Serial Monitor (115200 baud)
+// BENCH TEST: inputs forced ON without any wiring (bit k = input k). Set to 0 for the car!
+#define BENCH_FORCE_ON  0x${forceMask.toString(16)}u${forceMask ? `   // forced: ${inputs.filter((x) => forceIds.has(x.id)).map((x) => cmt(x.name)).join(', ')}` : ''}
 
 static const uint8_t SIDE_ID[NUM_SIDES] = { ${sideIds.join(', ')} };   // 0 = left, 1 = right
 CRGB leds[NUM_SIDES][NUM_LEDS];
@@ -185,7 +191,7 @@ static void debounceInputs(uint32_t now) {        // runs every loop()
 static uint32_t updateInputs(uint32_t now) {      // runs every frame, returns bit mask of ON inputs
   uint32_t mask = 0;
   for (int k = 0; k < NUM_INPUTS; k++) {
-    bool raw = stableSig[k];
+    bool raw = stableSig[k] || (BENCH_FORCE_ON & (1u << k));
     if (INPUT_CFG[k].toggle) {
       if (raw && !prevSig[k]) inOn[k] = !inOn[k];
     } else {
@@ -254,11 +260,47 @@ ${dispatch}
   return CRGB::Black;
 }
 
+// ---------------------------------------------------------------- serial debug
+static const char* const INPUT_NAMES[NUM_INPUTS] = { ${inputs.map((x) => `"${cstr(x.name)}"`).join(', ') || '""'} };
+static const char* const EFFECT_NAMES[NUM_EFFECTS] = { ${effects.map((x) => `"${cstr(x.name)}"`).join(', ') || '""'} };
+
+static void debugPrint(uint32_t now, uint32_t inMask) {
+#if DEBUG_SERIAL
+  static uint32_t lastIn = 0xffffffffu, lastFx = 0xffffffffu, lastPrint = 0;
+  uint32_t fxMask = 0;
+  for (int k = 0; k < NUM_EFFECTS; k++) if (fxActive[k]) fxMask |= 1u << k;
+  bool changed = inMask != lastIn || fxMask != lastFx;
+  if (!changed && now - lastPrint < 10000) return;          // otherwise a status line every 10 s
+  lastIn = inMask; lastFx = fxMask; lastPrint = now;
+  Serial.printf("[%7.1fs] inputs:", now / 1000.0f);
+  for (int k = 0; k < NUM_INPUTS; k++) {
+    Serial.printf(" %s=%s%s", INPUT_NAMES[k], (inMask >> k) & 1 ? "ON" : "off", (BENCH_FORCE_ON >> k) & 1 ? "(forced)" : "");
+  }
+  Serial.print("  | effects:");
+  bool any = false;
+  for (int k = 0; k < NUM_EFFECTS; k++) if ((fxMask >> k) & 1) { Serial.printf(" %s", EFFECT_NAMES[k]); any = true; }
+  Serial.println(any ? "" : " (none - LEDs off)");
+#else
+  (void)now; (void)inMask;
+#endif
+}
+
 void setup() {
+#if DEBUG_SERIAL
+  Serial.begin(115200);   // XIAO / S3 / C3: Tools > USB CDC On Boot must be "Enabled" to see this
+#endif
 ${sideIds.map((s, k) => outs.map((o) => `  FastLED.addLeds<LED_TYPE, ${pinOf(o, s)}, COLOR_ORDER>(leds[${k}] + ${o.start}, ${o.count})${rgbw ? '.setRgbw(RgbwDefault())' : ''};   // ${s ? 'right' : 'left'} light, line ${o.k + 1}: row${o.rows.length > 1 ? 's' : ''} ${rowList(o.rows)}`).join('\n')).join('\n')}
   FastLED.setMaxPowerInVoltsAndMilliamps(5, MAX_MILLIAMPS);
   FastLED.setBrightness(255);
   FastLED.clear(true);
+#if DEBUG_SERIAL
+  delay(1500);            // give the Serial Monitor a moment to connect
+  Serial.println();
+  Serial.println("Taillight Studio sketch running");
+  Serial.printf("  %d LEDs per light, %d light(s), %d inputs, %d effects\\n", NUM_LEDS, NUM_SIDES, NUM_INPUTS, NUM_EFFECTS);
+  for (int k = 0; k < NUM_INPUTS; k++) Serial.printf("  input %d: %s on GPIO %d%s\\n", k, INPUT_NAMES[k], INPUT_CFG[k].pin, (BENCH_FORCE_ON >> k) & 1 ? "  (BENCH TEST: forced ON)" : "");
+  Serial.println("  An input is ON when its pin is connected to GND.");
+#endif
   for (int k = 0; k < NUM_INPUTS; k++) pinMode(INPUT_CFG[k].pin, INPUT_PULLUP);
 }
 
@@ -269,7 +311,9 @@ void loop() {
   if (now - lastFrame < FRAME_MS) return;
   lastFrame = now;
 
-  updateEffects(updateInputs(now), now);
+  uint32_t inMask = updateInputs(now);
+  updateEffects(inMask, now);
+  debugPrint(now, inMask);
 
   // work out which step each active effect is on
   bool act[NUM_EFFECTS];
