@@ -59,7 +59,7 @@ export function sanitizeSteps(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
   for (const r of raw.slice(0, 20)) {
-    if (!r || !ANIMS[r.type]) continue;
+    if (!r || typeof r.type !== "string" || !Object.hasOwn(ANIMS, r.type)) continue;
     const s = { type: r.type, ...defaultParams(r.type) };
     if (isRGB(r.color)) s.color = r.color.map((x) => num(x, 0, 255, 0) | 0);
     if (isRGB(r.color2)) s.color2 = r.color2.map((x) => num(x, 0, 255, 0) | 0);

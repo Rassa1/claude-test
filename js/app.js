@@ -4,10 +4,11 @@ import { parseDescription } from './parser.js';
 import { compileCustom } from './custom.js';
 import { generateSketch } from './codegen.js';
 import { buildScene, renderScene, newInputState, newEffectState, engineStep, totalMs } from './engine.js';
-import { interpret, getSample } from './ai.js';
+import { interpret, getSample, sanitizeSteps } from './ai.js';
 import { pinUsage, pinOptions, pinProblems, setBoard, freePin as boardFreePin, remapPins, currentBoard, pinName, BOARDS } from './pins.js';
 import { outColor } from './matrix.js';
 import { textColumns, resolveFont } from './font.js';
+import { readLib, writeLib, newProjectId, exportPayload, parseImport, STATUSES } from './projects.js';
 import { lightCols } from './engine.js';
 
 // seconds for a text step's message to scroll fully past once
@@ -59,18 +60,72 @@ function migrateButtons(buttons) {
   }
   return { inputs, effects };
 }
+// bring any saved/imported project data up to the current format (null if it isn't one)
+function normalize(s) {
+  if (!s || typeof s !== 'object' || !s.matrix || !Array.isArray(s.matrix.rows) || !s.matrix.rows.length) return null;
+  if (Array.isArray(s.buttons) && !Array.isArray(s.effects)) { Object.assign(s, migrateButtons(s.buttons)); delete s.buttons; }
+  if (!Array.isArray(s.effects) || !Array.isArray(s.inputs) || !s.inputs.length) return null;
+  return sanitizeProject(s);
+}
+// Every value that ends up in the generated sketch is checked here, so a shared
+// project file can't sneak code into your firmware.
+const clampInt = (x, lo, hi, d) => (Number.isFinite(+x) ? Math.min(hi, Math.max(lo, Math.round(+x))) : d);
+const clampNum = (x, lo, hi, d) => (Number.isFinite(+x) ? Math.min(hi, Math.max(lo, +x)) : d);
+const oneOf = (x, list, d) => (list.includes(x) ? x : d);
+const str = (x, n, d) => (typeof x === 'string' && x.trim() ? x.slice(0, n) : d);
+function sanitizeProject(s) {
+  const m = s.matrix, D = defaultMatrix();
+  const out = {
+    ledsPerMeter: clampNum(m.ledsPerMeter, 1, 500, D.ledsPerMeter),
+    rowLengthCm: clampNum(m.rowLengthCm, 1, 300, D.rowLengthCm),
+    rowGapMm: clampNum(m.rowGapMm, 1, 200, D.rowGapMm),
+    wiring: oneOf(m.wiring, ['serpentine', 'progressive'], D.wiring),
+    start: oneOf(m.start, ['top-left', 'top-right', 'bottom-left', 'bottom-right'], D.start),
+    ledType: oneOf(m.ledType, ['WS2812B', 'WS2811', 'WS2813', 'WS2815', 'SK6812', 'SK6812_RGBW'], D.ledType),
+    colorOrder: oneOf(m.colorOrder, ['GRB', 'RGB', 'BRG', 'RBG', 'GBR', 'BGR'], D.colorOrder),
+    maxMilliamps: clampInt(m.maxMilliamps, 100, 50000, D.maxMilliamps),
+    lights: oneOf(m.lights, ['both', 'left', 'right'], 'both'),
+    board: oneOf(m.board, Object.keys(BOARDS), 'esp32'),
+    extraDark: clampInt(m.extraDark, 0, 1000, 0),
+    debugSerial: m.debugSerial !== false,
+    benchForce: Array.isArray(m.benchForce) ? m.benchForce.filter((x) => typeof x === 'string').slice(0, 32) : [],
+    outputs: (Array.isArray(m.outputs) && m.outputs.length ? m.outputs : [{ pinL: m.dataPin ?? 5, pinR: m.dataPinR ?? 18 }])
+      .slice(0, 8).map((o) => ({ pinL: clampInt(o?.pinL, 0, 48, 5), pinR: clampInt(o?.pinR, 0, 48, 18) })),
+  };
+  out.rows = m.rows.slice(0, 40).map((r) => ({ count: clampInt(r?.count, 1, 500, 18), offset: clampNum(r?.offset, -2000, 2000, 0), out: clampInt(r?.out, 0, out.outputs.length - 1, 0) }));
+  const inputs = s.inputs.slice(0, 16).map((x, k) => ({
+    id: str(x?.id, 40, 'i' + k), name: str(x?.name, 30, 'Input ' + (k + 1)), pin: clampInt(x?.pin, 0, 48, 4),
+    type: oneOf(x?.type, ['level', 'toggle'], 'level'), holdMs: clampInt(x?.holdMs, 0, 5000, 0), simPulse: !!x?.simPulse,
+  }));
+  const effects = s.effects.slice(0, 32).map((e, k) => {
+    const t = e?.trigger || {};
+    const conds = {};
+    for (const [id, c] of Object.entries(t.conds || {})) if (c === 'on' || c === 'off') conds[id] = c;
+    let steps = sanitizeSteps(e?.steps);
+    if (!steps.length) steps = sanitizeSteps([{ type: 'off', duration: 1 }]);
+    return {
+      id: str(e?.id, 40, 'e' + k), name: str(e?.name, 40, 'Effect ' + (k + 1)), side: oneOf(e?.side, ['both', 'left', 'right'], 'both'),
+      layer: oneOf(e?.layer, ['replace', 'overlay'], 'replace'), repeat: e?.repeat !== false, prompt: typeof e?.prompt === 'string' ? e.prompt.slice(0, 500) : '',
+      steps, trigger: { kind: oneOf(t.kind, ['while', 'once'], 'while'), match: oneOf(t.match, ['all', 'any'], 'all'), minOffMs: clampInt(t.minOffMs, 0, 86400000, 0), cancel: !!t.cancel, conds },
+    };
+  });
+  if (!effects.length) return null;
+  return { matrix: out, inputs, effects, sel: clampInt(s.sel, 0, effects.length - 1, 0), view: oneOf(s.view, ['both', 'left', 'right'], out.lights) };
+}
 function load() {
   for (const key of [STORE, 'taillight-studio-v2']) {
-    try {
-      const s = JSON.parse(localStorage.getItem(key));
-      if (!s || !s.matrix) continue;
-      if (Array.isArray(s.effects) && Array.isArray(s.inputs)) return s;
-      if (Array.isArray(s.buttons)) { Object.assign(s, migrateButtons(s.buttons)); delete s.buttons; return s; }
-    } catch {}
+    try { const s = normalize(JSON.parse(localStorage.getItem(key))); if (s) return s; } catch {}
   }
   return null;
 }
-let state = load() || { matrix: defaultMatrix(), ...defaultModel(), sel: 0 };
+// project library: the open project comes from there; older single-design saves become the first project
+let lib = readLib();
+let state = normalize(lib.projects[lib.current]?.data) || load() || { matrix: defaultMatrix(), ...defaultModel(), sel: 0 };
+if (!lib.projects[lib.current]) {
+  lib.current = newProjectId();
+  lib.projects[lib.current] = { name: 'My taillights', status: 'draft', updated: Date.now(), data: state };
+  writeLib(lib);
+}
 state.matrix.lights ??= 'both';
 state.matrix.board ??= 'esp32';
 setBoard(state.matrix.board);
@@ -84,7 +139,11 @@ let selRow = -1;
 let saveT;
 function save() {
   clearTimeout(saveT);
-  saveT = setTimeout(() => { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch {} }, 200);
+  saveT = setTimeout(() => {
+    try { localStorage.setItem(STORE, JSON.stringify(state)); } catch {}
+    const p = lib.projects[lib.current];
+    if (p) { p.data = state; p.updated = Date.now(); writeLib(lib); }
+  }, 200);
 }
 function matrixChanged() {
   layout = computeLayout(state.matrix);
@@ -762,17 +821,106 @@ $('#copy').onclick = async () => {
   catch { const r = document.createRange(); r.selectNodeContents($('#code')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Press Ctrl/Cmd+C to copy'); }
 };
 let downloads = null;
-$('#download').onclick = async () => {
+async function saveFile(filename, text, type = 'text/plain') {
   try {
     downloads ??= window.claude?.use ? await window.claude.use('downloads') : null;
-    if (downloads) { await downloads.save({ filename: 'taillight.ino', data: sketch }); return; }
+    if (downloads) { await downloads.save({ filename, data: text }); return; }
   } catch (e) { if (e?.code) { toast('Download cancelled'); return; } }
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([sketch], { type: 'text/plain' }));
-  a.download = 'taillight.ino';
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const fileSafe = (s) => String(s).trim().replace(/[^\w\- ]+/g, '').replace(/\s+/g, '-').slice(0, 40) || 'taillight';
+$('#download').onclick = () => saveFile(`${fileSafe(lib.projects[lib.current]?.name || 'taillight')}.ino`, sketch);
+
+// ---------------------------------------------------------------- projects
+const STATUS_LABEL = Object.fromEntries(STATUSES.map((s) => [s.id, s.label]));
+const fmtDate = (t) => new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+function flushSave() { clearTimeout(saveT); try { localStorage.setItem(STORE, JSON.stringify(state)); } catch {} const p = lib.projects[lib.current]; if (p) { p.data = state; p.updated = Date.now(); } writeLib(lib); }
+function openProject(id) {
+  flushSave();
+  lib.current = id;
+  if (!writeLib(lib)) { toast("Couldn't save – browser storage is blocked"); return; }
+  try { localStorage.removeItem(STORE); } catch {}
+  location.reload();
+}
+function renderProjectChip() {
+  const p = lib.projects[lib.current];
+  $('#projName').textContent = p?.name || 'Untitled';
+  const st = $('#projStatus');
+  st.textContent = STATUS_LABEL[p?.status] || 'Draft';
+  st.className = 'pstatus ' + (p?.status || 'draft');
+}
+function renderProjects() {
+  const cur = lib.projects[lib.current];
+  $('#pmName').value = cur?.name || '';
+  $('#pmStatus').innerHTML = STATUSES.map((s) => `<option value="${s.id}" ${s.id === cur?.status ? 'selected' : ''}>${s.label}</option>`).join('');
+  const rows = Object.entries(lib.projects).sort((a, b) => b[1].updated - a[1].updated);
+  $('#pmList').innerHTML = rows.map(([id, p]) => {
+    const n = p.data?.matrix?.rows?.reduce((a, r) => a + (r.count | 0), 0) || 0;
+    return `<div class="pm-row ${id === lib.current ? 'cur' : ''}" data-id="${id}">
+      <div class="pm-main"><div class="pm-name">${esc(p.name)} <span class="pstatus ${p.status}">${STATUS_LABEL[p.status] || 'Draft'}</span></div>
+        <div class="pm-meta">${n} LEDs per light · ${p.data?.effects?.length ?? 0} effect${(p.data?.effects?.length ?? 0) === 1 ? "" : "s"} · edited ${fmtDate(p.updated)}</div></div>
+      <div class="pm-actions">${id === lib.current ? '<span class="muted small">Open now</span>' : '<button data-a="open" class="ghost sm">Open</button>'}
+        <button data-a="export" class="ghost sm" title="Download as a .json file">Export</button>
+        <button data-a="del" class="ghost sm danger" ${Object.keys(lib.projects).length < 2 ? 'disabled' : ''}>Delete</button></div>
+    </div>`;
+  }).join('');
+  document.querySelectorAll('#pmList .pm-row').forEach((row) => row.querySelectorAll('button').forEach((b) => (b.onclick = () => {
+    const id = row.dataset.id, p = lib.projects[id];
+    if (b.dataset.a === 'open') openProject(id);
+    if (b.dataset.a === 'export') { if (id === lib.current) flushSave(); exportProject(p); }
+    if (b.dataset.a === 'del') {
+      if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.textContent = 'Really delete?'; return; }
+      delete lib.projects[id];
+      if (id === lib.current) { openProject(Object.keys(lib.projects)[0]); return; }
+      writeLib(lib); renderProjects();
+    }
+  })));
+}
+function exportProject(p) {
+  saveFile(`${fileSafe(p.name)}${p.status === 'official' ? '' : '-' + p.status}.taillight.json`, JSON.stringify(exportPayload(p), null, 1), 'application/json');
+}
+$('#projBtn').onclick = () => { flushSave(); renderProjects(); $('#projModal').hidden = false; };
+$('#pmClose').onclick = () => { $('#projModal').hidden = true; };
+$('#projModal').addEventListener('click', (e) => { if (e.target.id === 'projModal') $('#projModal').hidden = true; });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#projModal').hidden = true; });
+$('#pmName').oninput = (e) => { lib.projects[lib.current].name = e.target.value || 'Untitled'; writeLib(lib); renderProjectChip(); };
+$('#pmName').onchange = () => renderProjects();
+$('#pmStatus').onchange = (e) => { lib.projects[lib.current].status = e.target.value; writeLib(lib); renderProjectChip(); renderProjects(); };
+$('#pmCopy').onclick = () => {
+  flushSave();
+  const cur = lib.projects[lib.current], id = newProjectId();
+  lib.projects[id] = { name: cur.name + ' (copy)', status: 'draft', updated: Date.now(), data: structuredClone(state) };
+  openProject(id);
 };
+$('#pmExport').onclick = () => { flushSave(); exportProject(lib.projects[lib.current]); };
+$('#pmNew').onclick = () => {
+  flushSave();
+  const id = newProjectId();
+  lib.projects[id] = { name: 'New project', status: 'draft', updated: Date.now(), data: { matrix: defaultMatrix(), ...defaultModel(), sel: 0 } };
+  openProject(id);
+};
+$('#pmImport').onclick = () => $('#pmFile').click();
+$('#pmFile').onchange = async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  try {
+    const imp = parseImport(await f.text());
+    const data = normalize(imp.data);
+    if (!data) throw new Error("That file isn't a Taillight Studio project.");
+    const id = newProjectId();
+    lib.projects[id] = { name: imp.name, status: imp.status, updated: Date.now(), data };
+    flushSave();
+    openProject(id);
+  } catch (err) {
+    $('#pmError').textContent = err instanceof SyntaxError ? "That file isn't valid JSON." : err.message;
+  }
+};
+renderProjectChip();
 
 // ---------------------------------------------------------------- boot
 window.addEventListener('resize', () => { if ($('#tab-build').classList.contains('active')) renderBuild(); });

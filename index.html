@@ -14,7 +14,33 @@
       <button data-tab="animate"><b>2</b> Inputs &amp; effects</button>
       <button data-tab="code"><b>3</b> ESP32 code</button>
     </nav>
+    <button id="projBtn" class="projchip" title="Projects: open, save a copy, export, import">
+      <span class="muted small">Project</span> <span id="projName">My taillights</span> <span id="projStatus" class="pstatus draft">Draft</span>
+    </button>
   </header>
+
+  <div id="projModal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="pmTitle">
+      <div class="modal-head"><h2 id="pmTitle">Projects</h2><button id="pmClose" class="icon" title="Close">×</button></div>
+      <div class="grid2">
+        <label>This project's name<input type="text" id="pmName" maxlength="60"></label>
+        <label>Label<select id="pmStatus"></select></label>
+      </div>
+      <div class="row-btns">
+        <button id="pmCopy" class="ghost sm" title="Duplicate this project and open the copy">Save as copy</button>
+        <button id="pmExport" class="ghost sm">Export file</button>
+      </div>
+      <h3>All projects <span class="muted small">saved in this browser</span></h3>
+      <div id="pmList" class="pm-list"></div>
+      <div class="row-btns">
+        <button id="pmNew" class="primary sm">New project</button>
+        <button id="pmImport" class="ghost sm">Import file…</button>
+        <input type="file" id="pmFile" accept=".json,application/json" hidden>
+      </div>
+      <div id="pmError" class="err"></div>
+      <p class="muted small-p sm-top">Projects live in this browser only. Export the ones you care about as files to back them up or move them to another computer.</p>
+    </div>
+  </div>
 
   <!-- 1. MATRIX BUILDER -->
   <main id="tab-build" class="tab active">

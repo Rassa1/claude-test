@@ -24,6 +24,9 @@ python3 -m http.server 8000
 
 Animations: solid, off, sequential sweep, blink/hazard, brake flash, scanner, breathe, chase, color wave, rainbow, sparkle, scrolling text (one line across both lights or the same on each, 3×5 or 5×7 font), and custom formulas (`js/custom.js`).
 
+## Projects
+The **Project** button (top right) keeps several designs in your browser, each labelled Draft, Test or Official. Save a copy before experimenting, and **Export** projects as `.taillight.json` files to back them up or share them; **Import** loads them back. Imported files are validated, so a shared file can't inject code into the generated sketch.
+
 ## Files
 - `js/matrix.js` – layout model + drawing
 - `js/animations.js` – animation library (JS + matching C++)
@@ -32,6 +35,7 @@ Animations: solid, off, sequential sweep, blink/hazard, brake flash, scanner, br
 - `js/ai.js` – Claude interpretation (claude.ai artifact runtime) with keyword fallback
 - `js/custom.js` – formula language compiled to JS and C++
 - `js/font.js` – pixel fonts for scrolling text
+- `js/projects.js` – project library, export/import
 - `js/pins.js` – board pin maps (ESP32, XIAO ESP32-S3, ESP32-S3 DevKit, ESP32-C3, XIAO ESP32-C3), conflict checks
 - `js/codegen.js` – Arduino sketch generator
 - `js/app.js` – UI

@@ -11,7 +11,7 @@ const wrap = (arr, per = 20, indent = '  ') => {
   return lines.join(',\n');
 };
 const cstr = (s) => String(s).replace(/[^\x20-\x7e]/g, '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-const cmt = (s) => String(s).replace(/\*\//g, '* /').replace(/[\r\n]+/g, ' ');
+const cmt = (s) => String(s).replace(/→/g, '->').replace(/[·–—]/g, '-').replace(/[^\x20-\x7e]/g, ' ').replace(/\\/g, '/').replace(/\*\//g, '* /').replace(/\/\*/g, '/ *');
 
 function describe(s) {
   const d = ANIMS[s.type] || ANIMS.off;
