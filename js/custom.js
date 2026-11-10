@@ -19,7 +19,7 @@ export const FUNCS = {
 };
 const INPUTS = ['u', 'v', 'o', 't', 'i', 'n', 'side', 'PI'];
 const OUTPUTS = ['r', 'g', 'b'];
-const RESERVED = new Set([...INPUTS, ...Object.keys(FUNCS), 'float', 'BR', 'int', 'return', 'if', 'else', 'for', 'while', 'CRGB']);
+const RESERVED = new Set([...INPUTS, ...Object.keys(FUNCS), 'float', 'BR', 'kBright', 'int', 'return', 'if', 'else', 'for', 'while', 'CRGB']);
 
 export function hash32(a, b) {
   let h = (Math.imul(a, 0x9E3779B1) ^ Math.imul(b + 1, 0x85EBCA6B)) >>> 0;
@@ -99,7 +99,8 @@ export function compileCustom(src) {
     const [js, cpp] = translateExpr(expr, locals);
     if (decl) locals.add(name.s);
     jsLines.push(`${decl ? 'let ' : ''}${name.s} = ${js};`);
-    cppLines.push(`${decl ? 'float ' : ''}${name.s} = ${cpp};`);
+    const cname = OUTPUTS.includes(name.s) ? name.s : 'v_' + name.s;   // prefix locals: avoids clashes with SDK macros
+    cppLines.push(`${decl ? 'float ' : ''}${cname} = ${cpp};`);
   }
   if (!assignedOut) throw new Error('Set at least one of r, g, b');
   const body = `let r = 0, g = 0, b = 0;\n${jsLines.join('\n')}\nreturn [r, g, b];`;
@@ -138,7 +139,7 @@ function translateExpr(toks, locals) {
       } else if (INPUTS.includes(t.s)) {
         js.push(t.s); cpp.push(t.s === 'PI' ? '3.14159265f' : t.s);
       } else if (locals.has(t.s) || OUTPUTS.includes(t.s)) {
-        js.push(t.s); cpp.push(t.s);
+        js.push(t.s); cpp.push(OUTPUTS.includes(t.s) ? t.s : 'v_' + t.s);
       } else throw new Error(`Unknown name "${t.s}"`);
     } else {
       const s = t.s;

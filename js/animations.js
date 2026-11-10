@@ -93,7 +93,7 @@ export const ANIMS = {
     desc: 'Steady color (e.g. running/tail light).',
     uses: ['color'],
     js: (p) => p.color,
-    cpp: (p) => `return shade(${rgb(p.color)}, BR);`,
+    cpp: (p) => `return shade(${rgb(p.color)}, kBright);`,
   },
   off: {
     name: 'Off / pause',
@@ -115,14 +115,14 @@ export const ANIMS = {
     cpp: (p) => `float pos = ${posCPP(p.dir)};
   float ph = fractf(t / ${f(p.period)});
   float fill = ph < 0.6f ? ph / 0.6f : (ph < 0.85f ? 2.0f : -1.0f);
-  return shade(${rgb(p.color)}, (pos <= fill ? 1.0f : ${f(p.trail)}) * BR);`,
+  return shade(${rgb(p.color)}, (pos <= fill ? 1.0f : ${f(p.trail)}) * kBright);`,
   },
   blink: {
     name: 'Blink / hazard',
     desc: 'All LEDs flash on and off.',
     uses: ['color', 'period', 'trail'],
     js: (p, L, t) => (fract(t / p.period) < 0.5 ? p.color : mix([0, 0, 0], p.color, p.trail)),
-    cpp: (p) => `return shade(${rgb(p.color)}, (fractf(t / ${f(p.period)}) < 0.5f ? 1.0f : ${f(p.trail)}) * BR);`,
+    cpp: (p) => `return shade(${rgb(p.color)}, (fractf(t / ${f(p.period)}) < 0.5f ? 1.0f : ${f(p.trail)}) * kBright);`,
   },
   brake: {
     name: 'Brake flash',
@@ -133,7 +133,7 @@ export const ANIMS = {
       return on ? p.color : [0, 0, 0];
     },
     cpp: (p) => `bool on = t < ${f(p.flashes * p.period)} ? (fractf(t / ${f(p.period)}) < 0.5f) : true;
-  return shade(${rgb(p.color)}, on ? BR : 0.0f);`,
+  return shade(${rgb(p.color)}, on ? kBright : 0.0f);`,
   },
   scanner: {
     name: 'Scanner (Knight Rider)',
@@ -150,7 +150,7 @@ export const ANIMS = {
   float ph = fractf(t / ${f(p.period)});
   float s = ph < 0.5f ? ph * 2.0f : 2.0f - ph * 2.0f;
   float k = fmaxf(${f(p.trail)}, clamp01(1.0f - fabsf(pos - s) / ${f(p.width)}));
-  return shade(${rgb(p.color)}, k * BR);`,
+  return shade(${rgb(p.color)}, k * kBright);`,
   },
   breathe: {
     name: 'Breathe / pulse',
@@ -158,7 +158,7 @@ export const ANIMS = {
     uses: ['color', 'period'],
     js: (p, L, t) => mix([0, 0, 0], p.color, 0.05 + 0.95 * (0.5 - 0.5 * Math.cos(TAU * t / p.period))),
     cpp: (p) => `float k = 0.05f + 0.95f * (0.5f - 0.5f * cosf(TWO_PI_F * t / ${f(p.period)}));
-  return shade(${rgb(p.color)}, k * BR);`,
+  return shade(${rgb(p.color)}, k * kBright);`,
   },
   chase: {
     name: 'Chase',
@@ -171,7 +171,7 @@ export const ANIMS = {
     },
     cpp: (p) => `float pos = ${posCPP(p.dir)};
   float k = powf(0.5f + 0.5f * cosf(TWO_PI_F * (pos * ${f(p.count)} - t / ${f(p.period)})), 4.0f);
-  return mix2(${rgb(p.color2)}, ${rgb(p.color)}, k, BR);`,
+  return mix2(${rgb(p.color2)}, ${rgb(p.color)}, k, kBright);`,
   },
   wave: {
     name: 'Color wave',
@@ -183,7 +183,7 @@ export const ANIMS = {
     },
     cpp: (p) => `float pos = ${posCPP(p.dir)};
   float m = 0.5f + 0.5f * sinf(TWO_PI_F * (pos * ${f(p.count)} - t / ${f(p.period)}));
-  return mix2(${rgb(p.color)}, ${rgb(p.color2)}, m, BR);`,
+  return mix2(${rgb(p.color)}, ${rgb(p.color2)}, m, kBright);`,
   },
   rainbow: {
     name: 'Rainbow',
@@ -191,7 +191,7 @@ export const ANIMS = {
     uses: ['period', 'dir', 'count'],
     js: (p, L, t) => hue(fract(posJS(p.dir, L) * p.count - t / p.period)),
     cpp: (p) => `float pos = ${posCPP(p.dir)};
-  return hueColor(fractf(pos * ${f(p.count)} - t / ${f(p.period)}), BR);`,
+  return hueColor(fractf(pos * ${f(p.count)} - t / ${f(p.period)}), kBright);`,
   },
   custom: {
     name: 'Custom (AI formula)',
@@ -207,7 +207,7 @@ export const ANIMS = {
       const c = compiled(p.code);
       if (!c) return 'return CRGB::Black;';
       return `${c.cpp}
-  return CRGB((uint8_t)(clamp01(r * BR) * 255.0f + 0.5f), (uint8_t)(clamp01(g * BR) * 255.0f + 0.5f), (uint8_t)(clamp01(b * BR) * 255.0f + 0.5f));`;
+  return CRGB((uint8_t)(clamp01(r * kBright) * 255.0f + 0.5f), (uint8_t)(clamp01(g * kBright) * 255.0f + 0.5f), (uint8_t)(clamp01(b * kBright) * 255.0f + 0.5f));`;
     },
   },
   text: {
@@ -234,16 +234,16 @@ export const ANIMS = {
       const across = p.span === 'across' && ctx.pair;
       const safe = String(p.text || '').replace(/[^\x20-\x7e]/g, '?').replace(/\*\//g, '* /');
       return `// "${safe}" in the ${fontName} font, one byte per column (bit 0 = top row)
-  static const uint8_t COLS[${cols.length}] = { ${cols.join(', ')} };
-  const float W = LIGHT_COLS + 1.0f;
-  float gc = ${across ? '(side_ ? W + 2.0f + u * (W - 1.0f) : u * (W - 1.0f))' : 'u * (W - 1.0f)'};
-  const float TW = ${across ? '2.0f * W + 2.0f' : 'W'};
-  float pos = fmodf(${f(p.speed)} * t, TW + ${cols.length}.0f);
-  float left = ${p.scroll === 'right' ? `pos - ${cols.length}.0f` : 'TW - pos'};
+  static const uint8_t kTextCols[${cols.length}] = { ${cols.join(', ')} };
+  const float kW = LIGHT_COLS + 1.0f;
+  float gc = ${across ? '(side_ ? kW + 2.0f + u * (kW - 1.0f) : u * (kW - 1.0f))' : 'u * (kW - 1.0f)'};
+  const float kTotal = ${across ? '2.0f * kW + 2.0f' : 'kW'};
+  float pos = fmodf(${f(p.speed)} * t, kTotal + ${cols.length}.0f);
+  float left = ${p.scroll === 'right' ? `pos - ${cols.length}.0f` : 'kTotal - pos'};
   int tx = (int)floorf(gc - left + 0.5f);
   int fy = (int)(v * ${F.h}.0f); if (fy > ${F.h - 1}) fy = ${F.h - 1};
-  bool on = tx >= 0 && tx < ${cols.length} && ((COLS[tx] >> fy) & 1);
-  return shade(${rgb(p.color)}, (on ? 1.0f : ${f(p.trail)}) * BR);`;
+  bool on = tx >= 0 && tx < ${cols.length} && ((kTextCols[tx] >> fy) & 1);
+  return shade(${rgb(p.color)}, (on ? 1.0f : ${f(p.trail)}) * kBright);`;
     },
   },
   sparkle: {
@@ -257,8 +257,8 @@ export const ANIMS = {
     },
     cpp: (p) => `uint32_t frame = (uint32_t)(t * 20.0f);
   bool on = (hash32((uint32_t)i, frame) % 1000u) < ${Math.round(p.width * 300)}u;
-  if (on) return shade(${rgb(p.color2)}, BR);
-  return shade(${rgb(p.color)}, ${f(p.trail)} * BR);`,
+  if (on) return shade(${rgb(p.color2)}, kBright);
+  return shade(${rgb(p.color)}, ${f(p.trail)} * kBright);`,
   },
 };
 

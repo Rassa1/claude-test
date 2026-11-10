@@ -58,7 +58,7 @@ export function generateSketch(matrix, layout, model) {
 static CRGB b${bk}s${k}(int i_, float u, float v, float o, int side_, float t) {
   float i = (float)i_; float side = (float)side_; float n = (float)NUM_LEDS;
   (void)i; (void)side; (void)n; (void)u; (void)v; (void)o; (void)t;
-  const float BR = ${(+s.brightness).toFixed(3)}f; (void)BR;
+  const float kBright = ${(+s.brightness).toFixed(3)}f; (void)kBright;
   ${def.cpp(s, tctx).replace(/\(uint32_t\)i\b/g, '(uint32_t)i_')}
 }`;
   }).join('\n\n')).join('\n\n');
@@ -168,7 +168,7 @@ struct Input {
   bool toggle;          // true: push button, each press flips on/off
   uint16_t holdMs;      // level inputs: stay ON this long after the signal drops
 };
-static const Input IN[NUM_INPUTS] = {
+static const Input INPUT_CFG[NUM_INPUTS] = {
 ${inTable}
 };
 bool rawSig[NUM_INPUTS], stableSig[NUM_INPUTS], prevSig[NUM_INPUTS], inOn[NUM_INPUTS], inEverOn[NUM_INPUTS];
@@ -176,7 +176,7 @@ uint32_t lastFlip[NUM_INPUTS], inLastOn[NUM_INPUTS];
 
 static void debounceInputs(uint32_t now) {        // runs every loop()
   for (int k = 0; k < NUM_INPUTS; k++) {
-    bool sig = digitalRead(IN[k].pin) == LOW;
+    bool sig = digitalRead(INPUT_CFG[k].pin) == LOW;
     if (sig != rawSig[k]) { rawSig[k] = sig; lastFlip[k] = now; }
     if (sig != stableSig[k] && now - lastFlip[k] >= DEBOUNCE_MS) stableSig[k] = sig;
   }
@@ -186,11 +186,11 @@ static uint32_t updateInputs(uint32_t now) {      // runs every frame, returns b
   uint32_t mask = 0;
   for (int k = 0; k < NUM_INPUTS; k++) {
     bool raw = stableSig[k];
-    if (IN[k].toggle) {
+    if (INPUT_CFG[k].toggle) {
       if (raw && !prevSig[k]) inOn[k] = !inOn[k];
     } else {
       if (raw) { inLastOn[k] = now; inEverOn[k] = true; }
-      inOn[k] = raw || (inEverOn[k] && now - inLastOn[k] < IN[k].holdMs);
+      inOn[k] = raw || (inEverOn[k] && now - inLastOn[k] < INPUT_CFG[k].holdMs);
     }
     prevSig[k] = raw;
     if (inOn[k]) mask |= 1u << k;
@@ -214,13 +214,14 @@ struct Effect {
   uint32_t totalMs;
 };
 ${stepArrays}
-static const Effect FX[NUM_EFFECTS] = {
+static const Effect EFFECT_CFG[NUM_EFFECTS] = {
 ${btnTable}
 };
 bool fxPrev[NUM_EFFECTS], fxActive[NUM_EFFECTS], fxEverOn[NUM_EFFECTS];
 uint32_t fxSince[NUM_EFFECTS], fxOffSince[NUM_EFFECTS];
 
-static bool evalCond(const Effect& e, uint32_t on) {
+static bool evalCond(int k, uint32_t on) {   // takes an index: Arduino's auto-prototypes can't see struct types
+  const Effect& e = EFFECT_CFG[k];
   if (!e.needOn && !e.needOff) return false;
   if (!e.matchAll) return (on & e.needOn) || (~on & e.needOff);
   return (on & e.needOn) == e.needOn && (on & e.needOff) == 0;
@@ -228,8 +229,8 @@ static bool evalCond(const Effect& e, uint32_t on) {
 
 static void updateEffects(uint32_t on, uint32_t now) {
   for (int k = 0; k < NUM_EFFECTS; k++) {
-    const Effect& e = FX[k];
-    bool cond = evalCond(e, on);
+    const Effect& e = EFFECT_CFG[k];
+    bool cond = evalCond(k, on);
     if (e.kind == 1) {
       if (cond && !fxPrev[k]) {
         if (!fxEverOn[k] || now - fxOffSince[k] >= e.minOffMs) { fxActive[k] = true; fxSince[k] = now; }
@@ -258,7 +259,7 @@ ${sideIds.map((s, k) => outs.map((o) => `  FastLED.addLeds<LED_TYPE, ${pinOf(o, 
   FastLED.setMaxPowerInVoltsAndMilliamps(5, MAX_MILLIAMPS);
   FastLED.setBrightness(255);
   FastLED.clear(true);
-  for (int k = 0; k < NUM_INPUTS; k++) pinMode(IN[k].pin, INPUT_PULLUP);
+  for (int k = 0; k < NUM_INPUTS; k++) pinMode(INPUT_CFG[k].pin, INPUT_PULLUP);
 }
 
 void loop() {
@@ -275,12 +276,12 @@ void loop() {
   int curStep[NUM_EFFECTS];
   float curT[NUM_EFFECTS];
   for (int b = 0; b < NUM_EFFECTS; b++) {
-    act[b] = fxActive[b] && FX[b].numSteps > 0;
+    act[b] = fxActive[b] && EFFECT_CFG[b].numSteps > 0;
     if (!act[b]) continue;
     uint32_t el = now - fxSince[b];
-    uint32_t cyc = FX[b].repeat ? el % FX[b].totalMs : (el < FX[b].totalMs - 1 ? el : FX[b].totalMs - 1);
+    uint32_t cyc = EFFECT_CFG[b].repeat ? el % EFFECT_CFG[b].totalMs : (el < EFFECT_CFG[b].totalMs - 1 ? el : EFFECT_CFG[b].totalMs - 1);
     int k = 0; uint32_t start = 0;
-    while (k < FX[b].numSteps - 1 && cyc >= start + FX[b].stepMs[k]) { start += FX[b].stepMs[k]; k++; }
+    while (k < EFFECT_CFG[b].numSteps - 1 && cyc >= start + EFFECT_CFG[b].stepMs[k]) { start += EFFECT_CFG[b].stepMs[k]; k++; }
     curStep[b] = k;
     curT[b] = (cyc - start) / 1000.0f;
   }
@@ -292,9 +293,9 @@ void loop() {
       float u = qu / 255.0f, v = LED_V[i] / 255.0f, o = (255 - LED_U[i]) / 255.0f;
       CRGB c = CRGB::Black;
       for (int b = NUM_EFFECTS - 1; b >= 0; b--) {      // lowest priority first
-        if (!act[b] || !(FX[b].sides & (1 << side))) continue;
+        if (!act[b] || !(EFFECT_CFG[b].sides & (1 << side))) continue;
         CRGB x = renderPixel(b, curStep[b], i, u, v, o, side, curT[b]);
-        if (!FX[b].overlay || x.r || x.g || x.b) c = x;
+        if (!EFFECT_CFG[b].overlay || x.r || x.g || x.b) c = x;
       }
       leds[s][i] = c;
     }
