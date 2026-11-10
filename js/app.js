@@ -8,6 +8,7 @@ import { interpret, getSample, sanitizeSteps } from './ai.js';
 import { pinUsage, pinOptions, pinProblems, setBoard, freePin as boardFreePin, remapPins, currentBoard, pinName, pinInfo, BOARDS, deepSleepSupported, canDeepWake } from './pins.js';
 import { outColor } from './matrix.js';
 import { textColumns, resolveFont } from './font.js';
+import { startTour, introSeen } from './tour.js';
 import { readLib, writeLib, newProjectId, exportPayload, parseImport, STATUSES } from './projects.js';
 import { lightCols } from './engine.js';
 
@@ -1010,6 +1011,22 @@ $('#pmFile').onchange = async (e) => {
   }
 };
 renderProjectChip();
+
+// ---------------------------------------------------------------- guides
+const activeTab = () => (document.querySelector('.tab.active')?.id || 'tab-build').replace('tab-', '');
+$('#guideBtn').onclick = (e) => {
+  e.stopPropagation();
+  const m = $('#guideMenu');
+  m.hidden = !m.hidden;
+  $('#guideBtn').setAttribute('aria-expanded', String(!m.hidden));
+};
+document.addEventListener('click', () => { $('#guideMenu').hidden = true; $('#guideBtn').setAttribute('aria-expanded', 'false'); });
+document.querySelectorAll('#guideMenu button').forEach((b) => (b.onclick = () => {
+  $('#guideMenu').hidden = true;
+  $('#projModal').hidden = true;
+  startTour(b.dataset.g === 'intro' ? 'intro' : activeTab(), showTab);
+}));
+if (!introSeen()) setTimeout(() => startTour('intro', showTab), 700);
 
 // ---------------------------------------------------------------- boot
 window.addEventListener('resize', () => { if ($('#tab-build').classList.contains('active')) renderBuild(); });

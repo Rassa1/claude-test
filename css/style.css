@@ -228,3 +228,21 @@ label.chk { flex-direction: row; align-items: center; gap: 6px; align-self: end;
 .pw.sleep { color: #a9b8ff; border-color: #36407a; }
 .pw.boot { color: #f0b37e; border-color: #5a3f22; }
 .pw.off { color: var(--muted); }
+
+/* ---- guides ---- */
+.guidewrap { position: relative; margin-left: auto; }
+.guidewrap + .projchip { margin-left: 0; }
+.guidebtn { border-radius: 999px; }
+.guidemenu { position: absolute; right: 0; top: calc(100% + 6px); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px; z-index: 40; display: flex; flex-direction: column; min-width: 180px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+.guidemenu button { background: none; border: 0; color: var(--text); text-align: left; padding: 8px 10px; border-radius: 7px; }
+.guidemenu button:hover, .guidemenu button:focus-visible { background: var(--panel2); }
+.tour { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
+.tour-spot { position: fixed; border-radius: 10px; box-shadow: 0 0 0 9999px rgba(5, 6, 9, .62); outline: 2px solid var(--accent); transition: left .2s, top .2s, width .2s, height .2s; }
+.tour-card { position: fixed; pointer-events: auto; width: min(340px, calc(100vw - 32px)); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; box-shadow: 0 16px 40px rgba(0,0,0,.5); }
+.tour-count { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
+.tour-title { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--text); margin: 4px 0 6px; }
+.tour-body { font-size: 13px; color: #c7ccd8; line-height: 1.5; }
+.tour-body b { color: var(--text); }
+.tour-btns { display: flex; gap: 6px; margin-top: 12px; align-items: center; }
+.tour-btns span { flex: 1; }
+@media (prefers-reduced-motion: reduce) { .tour-spot { transition: none; } }
